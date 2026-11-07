@@ -92,6 +92,19 @@ svg text{fill:var(--muted);font-size:10px}
 .arch .t b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .arch .t span{font-size:12px;color:var(--muted)}
 .notice{background:var(--chip);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--muted);margin-top:16px}
+.award{border:1px solid var(--line);border-radius:16px;padding:14px 16px 2px;margin:16px 0;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 9%,transparent),transparent 55%)}
+.award .ah{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+.award .medal{font-size:34px;line-height:1}
+.award .an{font-weight:800;font-size:16.5px;line-height:1.35}
+.award .aw{font-size:14px;color:var(--muted);font-weight:600}
+.award .astat{display:inline-block;margin-top:4px;font-size:12px;background:var(--chip);border-radius:99px;padding:1px 9px}
+.playrow{display:flex;gap:8px;margin-top:6px}
+.playrow button{flex:1}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:10px}
+.cards figure{margin:0}
+.cards img{width:100%;border-radius:12px;display:block;cursor:pointer;box-shadow:var(--shadow)}
+.cards figcaption{display:flex;gap:6px;margin-top:6px}
+.cards figcaption button{flex:1;padding:7px 6px;font-size:13px}
 @media print{.noprint{display:none!important}body{background:#fff}.rpaper{border:0}}
 </style>
 </head>
@@ -169,6 +182,17 @@ svg text{fill:var(--muted);font-size:10px}
       <option>썸 / 연애 초기</option><option>연인</option><option>전 연인</option><option>친구 (1:1)</option>
       <option>친구 단톡방</option><option>가족</option><option>직장 / 동료</option><option>기타</option>
     </select>
+    <label for="spice">맵기</label>
+    <select id="spice">
+      <option value="mild">🌶 순한 맛 — 단톡방에 공유해도 안전</option>
+      <option value="medium">🌶🌶 보통 맛</option>
+      <option value="hot">🌶🌶🌶 매운 맛 — 각오하고 보기</option>
+    </select>
+    <label for="lengthSel">리포트 길이</label>
+    <select id="lengthSel">
+      <option value="normal">보통 — 6~9천 자 (원본과 비슷)</option>
+      <option value="short">짧게 — 3~4.5천 자 (출력 비용 약 절반)</option>
+    </select>
     <label for="question">특히 궁금한 것 <span class="hint">(선택)</span></label>
     <input type="text" id="question" placeholder="예) 이번 싸움 누가 잘못한 거야? / 걔 나한테 관심 있어?">
     <label for="budget">읽을 분량</label>
@@ -184,6 +208,7 @@ svg text{fill:var(--muted);font-size:10px}
     <div class="hint" id="sendInfo"></div>
     <button class="btn" id="run" style="width:100%;margin-top:14px">리포트 쓰기 시작</button>
     <div class="status" id="status"></div>
+    <div class="hint usage"></div>
     <div class="err" id="runErr"></div>
   </section>
 
@@ -194,11 +219,20 @@ svg text{fill:var(--muted);font-size:10px}
 
   <section id="report"></section>
 
+  <section class="card hidden" id="cardsBox">
+    <h3>🃏 인물 카드</h3>
+    <div class="hint" style="margin-top:-6px">인스타 스토리 크기(1080×1920) 이미지예요. 눌러서 크게 보고, 저장하거나 바로 공유하세요.</div>
+    <div class="cards" id="cards"></div>
+    <button class="ghost noprint" id="saveAllCards" style="width:100%;margin-top:10px">⤓ 카드 모두 저장</button>
+  </section>
+
   <section class="card noprint hidden" id="deepCard">
     <h3>📖 더 깊이 읽기</h3>
     <div class="hint" style="margin-top:-6px">이어서 읽고 싶은 챕터를 골라요 (여러 개 가능)</div>
     <div class="pick" id="deepList"></div>
     <button class="btn" id="deepBtn" style="width:100%;margin-top:12px">계속 →</button>
+    <label>같이 놀기</label>
+    <div class="playrow"><button class="ghost" id="awardBtn">🏆 우리방 시상식</button><button class="ghost" id="cardBtn">🃏 인물 카드 만들기</button></div>
     <label for="followQ">직접 물어보기</label>
     <div class="row">
       <input type="text" id="followQ" placeholder="예) 그럼 지금 뭐라고 먼저 연락하면 돼?">
@@ -206,6 +240,7 @@ svg text{fill:var(--muted);font-size:10px}
     </div>
     <div class="hint">추가 챕터·질문마다 대화 원문을 다시 보내므로 요금이 리포트 1회와 비슷하게 들어요.</div>
     <div class="status" id="deepStatus"></div>
+    <div class="hint usage"></div>
     <div class="err" id="deepErr"></div>
   </section>
 
@@ -324,7 +359,7 @@ function statsHTML(st){
 /* ========== settings ========== */
 const DEFAULT_MODEL={claude:'claude-sonnet-5-5',openai:'gpt-5.6-luna',gemini:'gemini-3.8-flash'};
 const PNAME={claude:'Claude (Anthropic)',openai:'OpenAI',gemini:'Gemini (Google)'};
-const S=Object.assign({tier:'mid',provider:'claude',models:{...DEFAULT_MODEL},manual:{},remember:false,persona:'제이',style:'roast'},store.get('sm_settings',{}));
+const S=Object.assign({tier:'mid',provider:'claude',models:{...DEFAULT_MODEL},manual:{},remember:false,persona:'제이',style:'roast',spice:'medium',length:'normal'},store.get('sm_settings',{}));
 S.models=Object.assign({...DEFAULT_MODEL},S.models||{});S.manual=S.manual||{};
 const saveS=()=>store.set('sm_settings',S);
 const sessionKeys={};
@@ -383,6 +418,8 @@ $('#tier').value=S.tier;
 $('#tier').onchange=e=>{S.tier=e.target.value;saveS();const k=$('#apiKey').value.trim();if(detectProvider(k))autoModel(S.provider,k,true)};
 $('#persona').oninput=e=>{S.persona=e.target.value.trim()||'제이';saveS()};
 $('#style').onchange=e=>{S.style=e.target.value;saveS()};
+$('#lengthSel').value=S.length;$('#lengthSel').onchange=e=>{S.length=e.target.value;saveS();updateSendInfo()};
+$('#spice').value=S.spice;$('#spice').onchange=e=>{S.spice=e.target.value;saveS()};
 $('#toggleKey').onclick=()=>{const k=$('#apiKey');k.type=k.type==='password'?'text':'password';$('#toggleKey').textContent=k.type==='password'?'보기':'숨기기'};
 $('#remember').checked=S.remember;$('#persona').value=S.persona;$('#style').value=S.style;
 $('#model').value=S.models[S.provider]||DEFAULT_MODEL[S.provider];
@@ -401,37 +438,68 @@ async function errOf(r){const t=await r.text();let d=null;try{d=JSON.parse(t)}ca
 async function* sse(resp){const rd=resp.body.getReader();const dec=new TextDecoder();let buf='';while(true){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i).trim();buf=buf.slice(i+1);if(line.startsWith('data:')){const d=line.slice(5).trim();if(d&&d!=='[DONE]')yield d}}}}
 const AH=key=>({'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'});
 const TEMP=0.7; // 모델 간 편차를 줄이려고 세 회사 모두 같은 값 (OpenAI 추론 모델은 고정값이라 생략)
-async function streamOnce({system,user,maxTokens,onText,model}){
+// 지원 안 되는 선택 파라미터는 400 오류 메시지를 보고 빼고 다시 보냄
+async function postJSON(url,headers,body,strips){
+  for(let n=0;n<4;n++){
+    const r=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});
+    if(r.ok)return r;const e=await errOf(r);
+    const st=strips.find(x=>x.re.test(e.message)&&x.del(body));if(!st||![400,404,422].includes(e.status))throw e;
+  }
+  throw new Error('요청 형식 오류가 계속돼요.');
+}
+async function streamOnce({system,prefix,user,maxTokens,onText,model,onUsage}){
   const provider=S.provider,key=$('#apiKey').value.trim();model=model||$('#model').value.trim();
-  let full='';const push=t=>{if(t){full+=t;onText(full)}};
+  const whole=prefix?prefix+'\n\n'+user:user;
+  let full='';const push=t=>{if(t){full+=t;onText(full)}};const U={inp:0,cr:0,cw:0,out:0};
   if(provider==='claude'){
-    const body={model,max_tokens:maxTokens,stream:true,temperature:TEMP,system,messages:[{role:'user',content:user}]};
-    let r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:AH(key),body:JSON.stringify(body)});
-    if(!r.ok){const e=await errOf(r);if(!/temperature/i.test(e.message))throw e;delete body.temperature;r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:AH(key),body:JSON.stringify(body)});if(!r.ok)throw await errOf(r)}
-    for await(const d of sse(r)){const j=JSON.parse(d);if(j.type==='content_block_delta'&&j.delta?.type==='text_delta')push(j.delta.text);else if(j.type==='error'){const er=new Error('API 오류: '+(j.error?.message||''));er.status=/overload/i.test(j.error?.type||'')?529:500;throw er}}
-    return full;
+    const body={model,max_tokens:maxTokens,stream:true,temperature:TEMP,
+      system:[{type:'text',text:system,cache_control:{type:'ephemeral'}}],
+      messages:[{role:'user',content:prefix?[{type:'text',text:prefix,cache_control:{type:'ephemeral'}},{type:'text',text:user}]:user}]};
+    const r=await postJSON('https://api.anthropic.com/v1/messages',AH(key),body,[
+      {re:/temperature/i,del:b=>'temperature' in b&&delete b.temperature},
+      {re:/cache_control|cache/i,del:b=>{let hit=false;if(Array.isArray(b.system)){b.system=b.system[0].text;hit=true}const c=b.messages[0].content;if(Array.isArray(c)){b.messages[0].content=c.map(x=>x.text).join('\n\n');hit=true}return hit}}]);
+    for await(const d of sse(r)){const j=JSON.parse(d);
+      if(j.type==='content_block_delta'&&j.delta?.type==='text_delta')push(j.delta.text);
+      else if(j.type==='message_start'){const u=j.message?.usage||{};U.inp=u.input_tokens||0;U.cr=u.cache_read_input_tokens||0;U.cw=u.cache_creation_input_tokens||0;U.out=u.output_tokens||0}
+      else if(j.type==='message_delta'&&j.usage){U.out=j.usage.output_tokens||U.out}
+      else if(j.type==='error'){const er=new Error('API 오류: '+(j.error?.message||''));er.status=/overload/i.test(j.error?.type||'')?529:500;throw er}}
+    onUsage&&onUsage(U,model);return full;
   }
   if(provider==='openai'){
-    const body={model,messages:[{role:'system',content:system},{role:'user',content:user}],max_completion_tokens:maxTokens*2,stream:true};
-    let r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+key},body:JSON.stringify(body)});
-    if(!r.ok){const e=await errOf(r);
-      if(/stream/i.test(e.message)){ // 스트리밍이 막힌 계정이면 한 번에 받기
-        delete body.stream;r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+key},body:JSON.stringify(body)});
-        if(!r.ok)throw await errOf(r);const d=await r.json();push(d.choices?.[0]?.message?.content||'');return full}
-      throw e}
-    for await(const d of sse(r)){const j=JSON.parse(d);push(j.choices?.[0]?.delta?.content||'')}
-    return full;
+    const H={'content-type':'application/json','authorization':'Bearer '+key};
+    const body={model,messages:[{role:'system',content:system},{role:'user',content:whole}],max_completion_tokens:maxTokens*2,stream:true,stream_options:{include_usage:true},reasoning_effort:'low',prompt_cache_key:'soksaem-'+(state.rid||0)};
+    const strips=[{re:/reasoning/i,del:b=>'reasoning_effort' in b&&delete b.reasoning_effort},{re:/prompt_cache_key/i,del:b=>'prompt_cache_key' in b&&delete b.prompt_cache_key},{re:/stream_options/i,del:b=>'stream_options' in b&&delete b.stream_options},{re:/stream/i,del:b=>{if(!b.stream)return false;delete b.stream;delete b.stream_options;return true}}];
+    const r=await postJSON('https://api.openai.com/v1/chat/completions',H,body,strips);
+    const take=u=>{if(!u)return;const c=u.prompt_tokens_details?.cached_tokens||0;U.cr=c;U.inp=(u.prompt_tokens||0)-c;U.out=u.completion_tokens||0};
+    if(!body.stream){const d=await r.json();push(d.choices?.[0]?.message?.content||'');take(d.usage);onUsage&&onUsage(U,model);return full}
+    for await(const d of sse(r)){const j=JSON.parse(d);push(j.choices?.[0]?.delta?.content||'');take(j.usage)}
+    onUsage&&onUsage(U,model);return full;
   }
   if(provider==='gemini'){
-    const body={systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:user}]}],generationConfig:{maxOutputTokens:maxTokens*2},
+    const body={systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:prefix?[{text:prefix},{text:user}]:[{text:user}]}],
+      generationConfig:{maxOutputTokens:maxTokens*2,thinkingConfig:{thinkingLevel:'low'}},
       safetySettings:['HARM_CATEGORY_HARASSMENT','HARM_CATEGORY_HATE_SPEECH','HARM_CATEGORY_SEXUALLY_EXPLICIT','HARM_CATEGORY_DANGEROUS_CONTENT'].map(category=>({category,threshold:'BLOCK_ONLY_HIGH'}))};
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
-    if(!r.ok)throw await errOf(r);
-    for await(const d of sse(r)){const j=JSON.parse(d);push((j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join(''))}
+    const r=await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,{'content-type':'application/json','x-goog-api-key':key},body,
+      [{re:/thinking/i,del:b=>{if(!b.generationConfig.thinkingConfig)return false;delete b.generationConfig.thinkingConfig;return true}}]);
+    for await(const d of sse(r)){const j=JSON.parse(d);push((j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join(''));
+      const u=j.usageMetadata;if(u){U.cr=u.cachedContentTokenCount||0;U.inp=(u.promptTokenCount||0)-U.cr;U.out=(u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0)}}
     if(!full)throw new Error('Gemini가 빈 응답을 보냈어요. 다른 모델로 시도해 보세요.');
-    return full;
+    onUsage&&onUsage(U,model);return full;
   }
 }
+/* ---- 사용량·비용 ---- */
+const TOK_PER_CHAR=0.8; // 한글 기준 대략치
+const PRICES=[ // USD / 100만 토큰 — 2026-11 공개 요금 기준(대략). [패턴, 입력, 출력, 캐시 읽기, 캐시 쓰기]
+  [/claude-sonnet-5/,2,10,0.2,2.5],[/claude-opus-5/,4,20,0.4,5],[/claude-haiku-5/,0.1,0.5,0.01,0.125],
+  [/gpt-5\.6-luna/,0.2,1.2,0.02,0.2],[/gpt-5\.6-terra/,2,12,0.2,2],
+  [/gemini-3\.8-flash(?!-lite)/,0.75,3.75,0.075,0.75],[/gemini-4-argon/,2,10,0.1,2]];
+const USD_KRW=1400;
+function costWon(u,model){const p=PRICES.find(x=>x[0].test(model||''));if(!p)return null;return Math.round((u.inp*p[1]+u.out*p[2]+u.cr*p[3]+u.cw*p[4])/1e6*USD_KRW*10)/10}
+function resetUsage(){state.usage={inp:0,cr:0,cw:0,out:0,won:0,unknown:false,calls:0};showUsage()}
+function addUsage(u,model){const s=state.usage||(resetUsage(),state.usage);['inp','cr','cw','out'].forEach(k=>s[k]+=u[k]||0);s.calls++;const w=costWon(u,model);if(w==null)s.unknown=true;else s.won+=w;showUsage()}
+const kt=n=>n>=1000?(n/1000).toFixed(1)+'K':String(n);
+function showUsage(){const s=state.usage;const html=!s||!s.calls?'':`📊 이번 분석 실사용: API 호출 ${s.calls}회 · 입력 ${kt(s.inp+s.cw)}${s.cr?` + 캐시 ${kt(s.cr)} (90% 할인)`:''} · 출력 ${kt(s.out)} 토큰${s.unknown?'':` · 약 ${Math.round(s.won).toLocaleString()}원`}`;
+  document.querySelectorAll('.usage').forEach(el=>el.textContent=html)}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const isBusy=e=>[429,500,502,503,504,529].includes(e.status)||/overload|high demand|UNAVAILABLE|RESOURCE_EXHAUSTED|try again later/i.test(e.message||'');
 function altModel(cur){
@@ -446,7 +514,7 @@ async function streamModel(opts){
   let model=$('#model').value.trim();const waits=[3000,8000,15000];
   for(let attempt=0;;attempt++){
     let got=false;
-    try{return await streamOnce({...opts,model,onText:t=>{got=true;opts.onText(t)}})}
+    try{return await streamOnce({...opts,model,onText:t=>{got=true;opts.onText(t)},onUsage:addUsage})}
     catch(e){
       if(got||!isBusy(e))throw e; // 이미 일부를 받았으면 이어쓰기로 처리
       if(attempt<waits.length){if(typeof curMsg!=='undefined')curMsg=`서버가 붐벼서 ${Math.round(waits[attempt]/1000)}초 뒤 다시 시도해요 (${attempt+1}/${waits.length})`;await sleep(waits[attempt]);continue}
@@ -466,7 +534,7 @@ async function listModels(provider,key){
 const netHint=e=>(e.message||String(e))+(/Failed to fetch|NetworkError|Load failed/i.test(e.message)?'\n→ 네트워크 문제이거나 브라우저가 요청을 막았어요. 인터넷 연결과 키를 확인해 주세요.':'');
 
 /* ========== state & input ========== */
-const state={msgs:[],stats:null,format:'',me:null,alias:{},rev:[],sent:null,sentNorm:'',parts:[],busy:false,notes:null,deepDesc:{},rid:0,modelIds:{},badModels:new Set()};
+const state={msgs:[],stats:null,format:'',me:null,alias:{},rev:[],sent:null,sentNorm:'',parts:[],busy:false,usage:null,sys:'',ctx:'',notes:null,deepDesc:{},rid:0,modelIds:{},badModels:new Set()};
 async function decode(buf){
   if(buf[0]===0xFF&&buf[1]===0xFE)return new TextDecoder('utf-16le').decode(buf);
   let t=new TextDecoder('utf-8').decode(buf);const bad=(t.match(/�/g)||[]).length;
@@ -582,29 +650,59 @@ function makeAliases(){
 const realToAlias=s=>{if(!$('#anon').checked)return s;let o=s;Object.entries(state.alias).sort((a,b)=>b[0].length-a[0].length).forEach(([r,a])=>{if(r.length>=2)o=o.split(r).join(a)});return o};
 const unalias=s=>{let o=String(s??'');for(const [a,r] of state.rev)o=o.split(a).join(r);return o};
 const maskText=s=>!$('#mask').checked?s:s.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g,'[이메일]').replace(/(\+?82[- ]?)?0?1[016789][- .]?\d{3,4}[- .]?\d{4}/g,'[전화번호]');
-function transcriptLines(){return state.msgs.map(m=>{const body=m.media?`[${m.text.replace(/[<>]/g,'')}]`:maskText(realToAlias(m.text)).replace(/\n/g,' / ');return `${m.ts?fmtTs(m.ts)+' ':''}${state.alias[m.sender]}: ${body}`})}
+/* ---- 토큰 절약형 원문 포맷 ----
+ [2026-10-01 목]            ← 날짜는 바뀔 때만 한 번
+ 15:21 인물A: 안녕 / 뭐해 / [사진]×2   ← 같은 사람이 10분 안에 연달아 보낸 메시지는 한 줄로 */
+const DOW='일월화수목금토';
+const dayKey=t=>{const d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${DOW[d.getDay()]}`};
+const hm=t=>{const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinutes())}`};
+const MAXMSG=400,GROUP_MS=10*60e3;
+const squeeze=s=>s.replace(/https?:\/\/\S+/g,'[링크]').replace(/([ㅋㅎㅠㅜㄷ])\1{3,}/g,'$1$1$1').replace(/([!?.~♡♥])\1{3,}/g,'$1$1$1').replace(/(\p{Extended_Pictographic})\1{2,}/gu,'$1$1').replace(/[ \t]{2,}/g,' ').trim();
+const mediaLabel=t=>'['+t.replace(/[<>]/g,'').replace(/\s*(읽지 않음|omitted|없음|제외됨)\s*/gi,'').replace(/^Media$/i,'미디어').trim()+']';
+function entries(){
+  const out=[];let cur=null;
+  for(const m of state.msgs){
+    let body=m.media?mediaLabel(m.text):squeeze(maskText(realToAlias(m.text))).replace(/\n+/g,' / ');
+    if(!body)continue;
+    if(body.length>MAXMSG)body=body.slice(0,MAXMSG)+'…(생략)';
+    const who=state.alias[m.sender],day=m.ts?dayKey(m.ts):'';
+    if(cur&&cur.who===who&&cur.day===day&&(!m.ts||!cur.last||m.ts-cur.last<=GROUP_MS)){
+      const lp=cur.parts[cur.parts.length-1];
+      if(m.media&&lp.replace(/×\d+$/,'')===body){const n=(+(lp.match(/×(\d+)$/)||[0,1])[1])+1;cur.parts[cur.parts.length-1]=`${body}×${n}`}
+      else cur.parts.push(body);
+      cur.last=m.ts||cur.last;cur.n++;continue}
+    cur={who,day,time:m.ts?hm(m.ts):'',last:m.ts,parts:[body],n:1};out.push(cur);
+  }
+  return out.map(e=>({day:e.day,n:e.n,text:`${e.time?e.time+' ':''}${e.who}: ${e.parts.join(' / ')}`}));
+}
+function materialize(list){let d=null;const o=[];for(const e of list){if(e.gap){o.push(e.gap);d=null;continue}if(e.day&&e.day!==d){o.push(`[${e.day}]`);d=e.day}o.push(e.text)}return o.join('\n')}
+const rawChars=()=>state.msgs.reduce((a,m)=>a+(m.ts?17:0)+m.sender.length+2+m.text.length+1,0); // 압축 전(예전 방식) 글자 수
 function buildTranscript(budgetOverride){
   makeAliases();
   const budget=budgetOverride||(+$('#budget').value)||120000;
-  const lines=transcriptLines();
-  const totalChars=lines.reduce((a,l)=>a+l.length+1,0);
-  if(totalChars<=budget)return {text:lines.join('\n'),used:lines.length,total:lines.length,sampled:false};
-  const K=10,per=Math.floor(budget/K),seg=Math.ceil(lines.length/K);const out=[];let used=0;
-  for(let k=0;k<K;k++){const a=k*seg,b=Math.min(lines.length,a+seg);if(a>=b)break;let c=0;
-    let start=a+Math.max(0,Math.floor((b-a)/2)-Math.floor(per/80/2));if(k===0)start=a;
-    if(k===K-1){let s=b,cc=0;while(s>a&&cc+lines[s-1].length<per){s--;cc+=lines[s].length+1}start=s}
-    let i=start;if(start>a)out.push(`… (중략: ${start-a}개 메시지) …`);
-    while(i<b&&c+lines[i].length<per){out.push(lines[i]);c+=lines[i].length+1;i++;used++}
-    if(i<b)out.push(`… (중략: ${b-i}개 메시지) …`);
+  const E=entries(),total=state.msgs.length;
+  const fullText=materialize(E);
+  if(fullText.length<=budget)return {text:fullText,used:total,total,sampled:false};
+  const K=10,per=Math.floor(budget/K),seg=Math.ceil(E.length/K);const out=[];let used=0;
+  const cnt=(a,b)=>E.slice(a,b).reduce((x,e)=>x+e.n,0);
+  for(let k=0;k<K;k++){const a=k*seg,b=Math.min(E.length,a+seg);if(a>=b)break;let c=0;
+    let start=a+Math.max(0,Math.floor((b-a)/2)-Math.floor(per/60/2));if(k===0)start=a;
+    if(k===K-1){let s2=b,cc=0;while(s2>a&&cc+E[s2-1].text.length<per){s2--;cc+=E[s2].text.length+1}start=s2}
+    let i2=start;if(start>a)out.push({gap:`… (중략: ${cnt(a,start)}개 메시지) …`});
+    while(i2<b&&c+E[i2].text.length<per){out.push(E[i2]);c+=E[i2].text.length+1;used+=E[i2].n;i2++}
+    if(i2<b)out.push({gap:`… (중략: ${cnt(i2,b)}개 메시지) …`});
   }
-  return {text:out.join('\n'),used,total:lines.length,sampled:true};
+  return {text:materialize(out),used,total,sampled:true};
 }
 const CHUNK=90000,FULL_SAMPLE=60000;
-function chunkLines(){makeAliases();const lines=transcriptLines();const out=[];let cur=[],c=0;for(const l of lines){if(c+l.length>CHUNK&&cur.length){out.push(cur);cur=[];c=0}cur.push(l);c+=l.length+1}if(cur.length)out.push(cur);return out}
+function chunkTexts(){makeAliases();const E=entries();const out=[];let cur=[],c=0;for(const e of E){if(c+e.text.length>CHUNK&&cur.length){out.push(materialize(cur));cur=[];c=0}cur.push(e);c+=e.text.length+1}if(cur.length)out.push(materialize(cur));return out}
 function updateSendInfo(){if(!state.msgs.length)return;
-  if($('#budget').value==='full'){const ch=chunkLines();const tot=ch.reduce((a,c)=>a+c.join('\n').length,0);
+  if($('#budget').value==='full'){const ch=chunkTexts();const tot=ch.reduce((a,c)=>a+c.length,0);
     $('#sendInfo').textContent=ch.length<=1?`대화가 짧아서 한 번에 전부 읽어요 (${tot.toLocaleString()}자).`:`전체 ${tot.toLocaleString()}자를 ${ch.length}개 구간으로 나눠 먼저 읽고(1단계), 종합해서 리포트를 써요(2단계). API 호출 ${ch.length+1}회 — 요금이 표준의 약 ${Math.max(2,Math.round(tot/120000)+1)}배예요.`;return}
-  const t=buildTranscript();$('#sendInfo').textContent=`보낼 분량: ${t.text.length.toLocaleString()}자 · 메시지 ${t.used.toLocaleString()} / ${t.total.toLocaleString()}개`+(t.sampled?' (시기별로 고르게 뽑아서 보냄)':' (전부)')}
+  const t=buildTranscript();const raw=rawChars();const sav=t.sampled?0:Math.max(0,Math.round((1-t.text.length/raw)*100));
+  const estIn=Math.round((t.text.length+3500)*TOK_PER_CHAR),estOut=Math.round((S.length==='short'?4000:8000)*TOK_PER_CHAR);
+  const won=costWon({inp:estIn,out:estOut,cr:0,cw:0},$('#model').value.trim());
+  $('#sendInfo').textContent=`보낼 분량: ${t.text.length.toLocaleString()}자 · 메시지 ${t.used.toLocaleString()} / ${t.total.toLocaleString()}개`+(t.sampled?' (시기별로 고르게 뽑아서 보냄)':' (전부)')+(sav>3?` · 압축으로 ${sav}% 절약`:'')+` · 메인 리포트 예상 약 ${(estIn/1000).toFixed(1)}K+${(estOut/1000).toFixed(1)}K 토큰${won!=null?` ≈ ${won.toLocaleString()}원`:''}`}
 
 /* ========== persona & prompts ========== */
 function avatarSVG(style){
@@ -639,10 +737,16 @@ const FORMAT=`[출력 형식 — 아래 문법만 사용. 코드블록·JSON·�
 그리고 7분 뒤, 하린이 하나를 더 보내.
 > 하린: 괜찮다니까
 도윤아, 같은 말을 세 번 하는 사람은 보통 안 괜찮아. **세 번째 "괜찮아"는 '그만 물어봐'가 아니라 '한 번만 더 물어봐'였을 가능성이 커.** 근데 너는 거기서 "ㅇㅋ 잘 자"를 보냈지. 여기서 나 진짜 머리 감싸 쥐었다.`;
+const SPICE={
+  mild:'순한 맛 — 놀림은 아주 가볍고 애정 어리게. 칭찬과 따뜻함의 비중을 높인다. 이 글이 당사자들이 다 있는 단톡방에 그대로 공유된다고 가정하고, 누가 읽어도 기분 상하지 않게 쓴다.',
+  medium:'보통 맛 — 웃기게 놀리되 선은 지킨다. 팩트는 정확히, 끝에는 편이 되어 준다.',
+  hot:'매운 맛 — 팩폭 강도 최대. 돌려 말하지 않고 모순을 정면으로 찌른다. 단, 외모·민감한 특성 비하, 욕설, 인격 모독은 금지. 매워도 근거는 정확해야 한다.'
+};
 function buildSystem(){
   const P=PERSONA[S.style]||PERSONA.roast;
   return `너는 '${S.persona||'제이'}'. ${P.tag}. 사람들의 메신저 대화를 처음부터 끝까지 읽고, 그 대화에 대해 친구에게 길게 써 주는 편지 같은 관전평을 쓴다.
 성격과 말투: ${P.voice}
+맵기: ${SPICE[S.spice]||SPICE.medium}
 
 원칙:
 1. 반드시 대화에 실제로 있는 근거로 말한다. 주장마다 실제 메시지를 말풍선 인용(> 이름: 메시지)으로 보여준다. 인용은 원문 그대로, 없는 문장을 지어내지 않는다. 각 챕터에 인용을 2번 이상 넣는다.
@@ -655,13 +759,15 @@ function buildSystem(){
 
 ${FORMAT}`;
 }
-const MAIN_PLAN=`[이번에 쓸 것: 메인 리포트]
-아래 순서로, 본문 전체 6,000~9,000자 분량으로 쓴다. 분량 배분(대략): 도입 600자 · 자화상 인물당 700자 · 장면 하나당 600자 · 속뜻 번역 1,000자 · 안 보이는 것 800자 · 마지막 400자. 일곱 부분을 하나도 빠뜨리지 말고 끝까지 쓴다.
+const LEN=()=>S.length==='short'?{main:'본문 전체 3,000~4,500자 분량으로 쓴다. 분량 배분(대략): 도입 300자 · 자화상 인물당 350자 · 장면 하나당 350자 · 속뜻 번역 500자 · 안 보이는 것 400자 · 마지막 200자.',scenes:'2~3개',trans:'2~3개',deep:'800~1,500자',award:'1,200~2,000자',follow:'300~800자'}
+  :{main:'본문 전체 6,000~9,000자 분량으로 쓴다. 분량 배분(대략): 도입 600자 · 자화상 인물당 700자 · 장면 하나당 600자 · 속뜻 번역 1,000자 · 안 보이는 것 800자 · 마지막 400자.',scenes:'3~5개',trans:'3~5개',deep:'1,500~3,000자',award:'2,000~4,000자',follow:'500~1,500자'};
+const mainPlan=()=>`[이번에 쓸 것: 메인 리포트]
+아래 순서로, ${LEN().main} 일곱 부분을 하나도 빠뜨리지 말고 끝까지 쓴다.
 1) "# 제목" — 이 대화를 한 줄로 요약하는 재치 있는 제목(이모지 1~2개).
 2) 도입 (챕터 제목 없이 바로 문단 3~5개) — 첫 문장은 요청자의 이름을 부르며 곧바로 본론에 들어간다(요청자가 없으면 "너희"). 다 읽는 동안 네가 보인 반응(웃음, 한숨, 탄성)을 생생하게 묘사하고, "이 대화를 한 줄로 요약하면?" 식으로 대화의 본질을 꿰뚫는 문장을 **굵게** 던진다. 메시지 수, 시간 간격, 몇 글자 답장 같은 구체적인 숫자를 섞는다.
 3) "## 🪞 스스로 믿는 모습, 실제로 드러난 모습" — 주요 인물마다 "### 1. 이름: 별명 이모지" 형식(별명은 그 사람의 모순을 담은 재치 있는 표현, 예: '쿨한 척하는 확인 장인'). 본인이 생각하는 자기 모습과 대화에서 드러난 실제 모습의 차이를 인용과 함께 쓴다. 단톡방이면 주요 인물 최대 6명.
-4) "## 🍿 읽다가 멈칫한 장면들" — "### 장면 1: 제목 이모지" 형식으로 3~5개, 시간순. 장면마다 말풍선 인용 후 생생한 실시간 리액션과 해설.
-5) "## 🔤 속뜻 번역" — 오해를 만든 핵심 발언 3~5개. 각 발언을 "- **발언자의 \"원문\"**" 항목으로 쓰고, 하위 항목으로 "**상대에게 들린 뜻:**"과 "**실제로 하고 싶었던 말:**"을 쓴다.
+4) "## 🍿 읽다가 멈칫한 장면들" — "### 장면 1: 제목 이모지" 형식으로 ${LEN().scenes}, 시간순. 장면마다 말풍선 인용 후 생생한 실시간 리액션과 해설.
+5) "## 🔤 속뜻 번역" — 오해를 만든 핵심 발언 ${LEN().trans}. 각 발언을 "- **발언자의 \"원문\"**" 항목으로 쓰고, 하위 항목으로 "**상대에게 들린 뜻:**"과 "**실제로 하고 싶었던 말:**"을 쓴다.
 6) "## 💡 너무 가까워서 안 보이는 것" — 당사자들은 못 보지만 밖에서 보면 선명한 패턴과 관계의 본질.
 7) "## ✍️ 마지막으로" — 짧은 판정과 진심 어린 한마디로 마무리.
 
@@ -698,6 +804,7 @@ function contextBlock(){
 [요청자가 특히 궁금한 것] ${realToAlias($('#question').value.trim())||'없음'}
 [기간] ${st.hasTime?fmtDate(st.first)+' ~ '+fmtDate(st.last):'시간 정보 없음'}
 [분량] 전체 메시지 ${t.total}개 중 ${t.used}개 포함${t.sampled?' (긴 대화라 시기별로 고르게 뽑았고 중간은 생략됨)':''}
+[원문 표기법] [YYYY-MM-DD 요일]은 날짜, 각 줄은 "시각 이름: 메시지". 같은 사람이 10분 안에 연달아 보낸 메시지는 " / "로 이어 붙였고 [사진]×3은 사진 3장. 말풍선으로 인용할 때는 " / " 사이의 메시지 하나만 원문 그대로 쓴다.
 [참여자 통계 — 앱이 직접 계산한 정확한 수치]
 ${statsForPrompt()}
 
@@ -720,19 +827,21 @@ function renderMarkup(md){
   const fp=()=>{if(para.length){h+=`<p>${para.map(inline).join(' ')}</p>`;para=[]}};
   const fb=()=>{if(!bub.length)return;let prev=null;h+='<div class="chat">';for(const b of bub){const real=unalias(b.who).trim();const mine=state.me&&real===state.me;if(real!==prev)h+=`<div class="who${mine?' r':''}">${esc(real)}</div>`;const ok=normQ(b.text).length<2||state.sentNorm.includes(normQ(b.text));h+=`<div class="bub${mine?' me':''}">${inline(b.text)}${ok?'':'<span class="nv" title="원문과 정확히 일치하지 않는 인용">≈</span>'}</div>`;prev=real}h+='</div>';bub=[]};
   const fl=()=>{if(!list.length)return;let out='<ul>',depth=0;list.forEach((it,i)=>{const d=Math.min(it.d,depth+1);if(d>depth){out=out.replace(/<\/li>$/,'')+'<ul>'}else if(d<depth){out+='</ul></li>'}out+=`<li>${inline(it.t)}</li>`;depth=d});while(depth-->0)out+='</ul></li>';h+=out+'</ul>';list=[]};
+  let inAward=false;const ca=()=>{if(inAward){h+='</div>';inAward=false}};
   const fa=()=>{fp();fb();fl()};
   for(const raw of md.replace(/\r/g,'').split('\n')){
     const t=raw.replace(/\s+$/,'');
     if(!t.trim()){fa();continue}
     let m;
-    if(m=t.match(/^#\s+(.*)$/)){fa();h+=`<h1 class="rtitle">${inline(m[1])}</h1><!--HEAD-->`;continue}
-    if(m=t.match(/^##\s+(.*)$/)){fa();let x=m[1].trim(),ico='';const e=x.match(EMO);if(e){ico=e[1];x=x.slice(e[0].length)}h+=`<div class="chap">${ico?`<div class="ico">${ico}</div>`:''}<h2>${inline(x)}</h2><div class="dv">— ◆ —</div></div>`;continue}
+    if(m=t.match(/^::award\s+(.*)$/)){fa();ca();const [medal,name,who,stat]=m[1].split('|').map(x=>x.trim());h+=`<div class="award"><div class="ah"><div class="medal">${esc(medal||'🏅')}</div><div><div class="an">${inline(name||'')}</div><div class="aw">${inline(who||'')}</div>${stat?`<span class="astat">${inline(stat)}</span>`:''}</div></div>`;inAward=true;continue}
+    if(m=t.match(/^#\s+(.*)$/)){fa();ca();h+=`<h1 class="rtitle">${inline(m[1])}</h1><!--HEAD-->`;continue}
+    if(m=t.match(/^##\s+(.*)$/)){fa();ca();let x=m[1].trim(),ico='';const e=x.match(EMO);if(e){ico=e[1];x=x.slice(e[0].length)}h+=`<div class="chap">${ico?`<div class="ico">${ico}</div>`:''}<h2>${inline(x)}</h2><div class="dv">— ◆ —</div></div>`;continue}
     if(m=t.match(/^#{3,}\s+(.*)$/)){fa();h+=`<h4>${inline(m[1])}</h4>`;continue}
     if(m=t.match(/^\s*>\s?(.*)$/)){fp();fl();const c=m[1].match(/^\**([^:：*]{1,30}?)\**\s*[:：]\s*(.*)$/);if(c)bub.push({who:c[1],text:c[2].replace(/^["“]|["”]$/g,'')});else if(bub.length)bub[bub.length-1].text+='\n'+m[1];else bub.push({who:'',text:m[1]});continue}
     if(m=t.match(/^(\s*)[-*•]\s+(.*)$/)){fp();fb();list.push({d:m[1].length>=2?1:0,t:m[2]});continue}
     fb();fl();para.push(t.trim());
   }
-  fa();return h;
+  fa();ca();return h;
 }
 function reportHTML(streaming){
   const P=PERSONA[S.style]||PERSONA.roast;
@@ -758,9 +867,9 @@ function checkReady(errEl){
   if(!$('#model').value.trim()){errEl.textContent='모델 이름을 넣어주세요.';return false}
   return true;
 }
-async function runPart(part,user,maxTokens,statusEl,errEl,label){
+async function runPart(part,user,maxTokens,statusEl,errEl,label,prefix=state.ctx){
   state.parts.push(part);state.busy=true;setStatus(statusEl,label);
-  try{await streamModel({system:buildSystem(),user,maxTokens,onText:t=>{part.text=t;paint(true)}});return true}
+  try{await streamModel({system:state.sys||buildSystem(),prefix,user,maxTokens,onText:t=>{part.text=t;paint(true)}});return true}
   catch(e){errEl.textContent=netHint(e);if(!part.text)state.parts.pop();return false}
   finally{state.busy=false;setStatus(statusEl,'');paint(false)}
 }
@@ -768,7 +877,7 @@ const NOTE_SYSTEM='너는 대화 분석 보조원이다. 긴 메신저 대화의
 async function readChunks(chunks){
   const notes=new Array(chunks.length);let done=0,next=0;const errEl=$('#runErr');
   setStatus($('#status'),`1단계: 대화 전체를 ${chunks.length}개 구간으로 나눠 읽는 중… 0/${chunks.length}`);
-  const worker=async()=>{while(next<chunks.length){const k=next++;const txt=chunks[k].join('\n');
+  const worker=async()=>{while(next<chunks.length){const k=next++;const txt=chunks[k];
     const user=`[구간 ${k+1}/${chunks.length}]\n${txt}\n\n이 구간의 노트를 1,500~2,500자로 쓴다:\n- 기간\n- 주요 사건·갈등·전환점 (날짜와 함께)\n- 인물별 태도·톤의 변화\n- 반복되는 농담·말버릇\n- 핵심 인용 8~15개를 "> 이름: 원문" 형식으로 (원문 그대로)`;
     notes[k]=await streamModel({system:NOTE_SYSTEM,user,maxTokens:4000,onText:()=>{}});
     done++;curMsg=`1단계: 대화를 구간별로 읽는 중… ${done}/${chunks.length}`}};
@@ -776,21 +885,22 @@ async function readChunks(chunks){
 }
 $('#run').onclick=async()=>{
   $('#runErr').textContent='';if(state.busy||!checkReady($('#runErr')))return;
-  state.notes=null;state.parts=[];doneDeep.clear();state.deepDesc={};state.rid=Date.now();
-  $('#statsCard').classList.add('hidden');$('#deepCard').classList.add('hidden');$('#report').innerHTML='';
+  state.notes=null;state.parts=[];resetUsage();doneDeep.clear();state.deepDesc={};state.rid=Date.now();
+  $('#statsCard').classList.add('hidden');$('#deepCard').classList.add('hidden');$('#report').innerHTML='';$('#cardsBox').classList.add('hidden');$('#awardBtn').textContent='🏆 우리방 시상식';
   $('#run').disabled=true;state.busy=true;
   let prepOk=true;
   try{
     if($('#budget').value==='full'){
-      const chunks=chunkLines();
-      state.sentNorm=normQ(chunks.map(c=>c.join('\n')).join('\n'));
+      const chunks=chunkTexts();
+      state.sentNorm=normQ(chunks.join('\n'));
       if(chunks.length>1){const notes=await readChunks(chunks);if(!notes)prepOk=false;else{state.notes=notes;state.sent=buildTranscript(FULL_SAMPLE)}}
       else state.sent=buildTranscript(CHUNK*2);
     }else{state.sent=buildTranscript();state.sentNorm=normQ(state.sent.text)}
   }catch(e){$('#runErr').textContent=netHint(e);prepOk=false}
   finally{state.busy=false;setStatus($('#status'),'')}
   if(!prepOk){$('#run').disabled=false;return}
-  const ok=await runPart({text:''},`${contextBlock()}\n\n${MAIN_PLAN}`,16000,$('#status'),$('#runErr'),`${state.notes?'2단계: ':''}${S.persona}가 리포트를 쓰는 중…`);
+  state.sys=buildSystem();state.ctx=contextBlock(); // 이후 모든 호출에서 바이트 단위로 같은 앞부분 → 캐시 적중
+  const ok=await runPart({text:''},`${mainPlan()}`,16000,$('#status'),$('#runErr'),`${state.notes?'2단계: ':''}${S.persona}가 리포트를 쓰는 중…`);
   if(state.parts[0]?.text){if(!ok)$('#runErr').textContent+='\n→ 써둔 부분은 살려서 이어서 쓸게요.';await repairMain(state.parts[0]);if(!missingParts(state.parts[0].text).length)$('#runErr').textContent=''}
   $('#run').disabled=false;
   if(state.parts.length){state.deepDesc=parseDeep(state.parts[0].text);renderDeep();$('#deepCard').classList.remove('hidden');archiveSave()}
@@ -807,9 +917,9 @@ async function repairMain(part){
   for(let round=0;round<2;round++){
     const miss=missingParts(part.text);if(!miss.length)return;
     const base=part.text.replace(/\[\[DEEP[\s\S]*$/,'').trimEnd()+'\n\n';
-    const user=`${contextBlock()}\n\n${MAIN_PLAN}\n\n[네가 쓰던 리포트 — 여기서 끊겼거나 빠진 부분이 있다]\n${base}\n\n[이번에 쓸 것: 이어쓰기]\n위 리포트를 처음부터 다시 쓰지 말고, 끝난 바로 다음부터 이어서 쓴다. 빠진 부분: ${miss.join(', ')}. 이미 쓴 내용은 반복하지 않는다. "# 제목"은 다시 쓰지 않는다.`;
+    const user=`${mainPlan()}\n\n[네가 쓰던 리포트 — 여기서 끊겼거나 빠진 부분이 있다]\n${base}\n\n[이번에 쓸 것: 이어쓰기]\n위 리포트를 처음부터 다시 쓰지 말고, 끝난 바로 다음부터 이어서 쓴다. 빠진 부분: ${miss.join(', ')}. 이미 쓴 내용은 반복하지 않는다. "# 제목"은 다시 쓰지 않는다.`;
     state.busy=true;setStatus($('#status'),`빠진 부분 이어 쓰는 중… (${miss.length}곳)`);
-    try{await streamModel({system:buildSystem(),user,maxTokens:12000,onText:t=>{part.text=base+t.replace(/^#\s.*\n/,'');paint(true)}})}
+    try{await streamModel({system:state.sys||buildSystem(),prefix:state.ctx,user,maxTokens:12000,onText:t=>{part.text=base+t.replace(/^#\s.*\n/,'');paint(true)}})}
     catch(e){$('#runErr').textContent=netHint(e);return}
     finally{state.busy=false;setStatus($('#status'),'');paint(false)}
   }
@@ -821,6 +931,14 @@ function renderDeep(){
   $('#deepList').innerHTML=DEEP.map(d=>{const dn=doneDeep.has(d.id);const desc=state.deepDesc?.[d.id]?unalias(state.deepDesc[d.id]):d.d;return `<label><input type="checkbox" value="${d.id}" ${dn?'disabled':'checked'}><div>${d.t}${dn?' <span class="chip">읽음</span>':''}<small>${esc(desc)}</small></div></label>`}).join('');
   $('#deepBtn').textContent=left?`계속 → (${left}개 남음)`:'모두 읽었어요';$('#deepBtn').disabled=!left;
 }
+function priorDigest(){ // 이미 쓴 리포트 전문 대신 뼈대(제목·소제목·상·굵은 핵심 문장)만
+  const out=[];
+  for(const p of state.parts){if(p.q)out.push(`## 💬 질문: ${p.q}`);
+    for(const l of cleanOut(p.text).split('[[DEEP')[0].split('\n')){const t=l.trim();
+      if(/^#{1,3}\s/.test(t)||/^::award/.test(t)){out.push(t);continue}
+      if(t.startsWith('>'))continue;const b=t.match(/\*\*[^*]{4,140}\*\*/g);if(b)out.push('· '+b.slice(0,2).join(' '))}}
+  let s=out.join('\n');if(s.length>3500)s=s.slice(0,3500)+'\n…';return s;
+}
 const priorReport=()=>state.parts.map(p=>(p.q?`## 💬 ${p.q}\n`:'')+p.text).join('\n\n');
 $('#deepBtn').onclick=async()=>{
   $('#deepErr').textContent='';if(state.busy||!checkReady($('#deepErr')))return;
@@ -828,7 +946,7 @@ $('#deepBtn').onclick=async()=>{
   if(!ids.length){$('#deepErr').textContent='읽고 싶은 챕터를 하나 이상 골라주세요.';return}
   $('#deepBtn').disabled=true;
   for(const id of ids){const d=DEEP.find(x=>x.id===id);
-    const user=`${contextBlock()}\n\n[네가 이미 쓴 리포트 — 반복하지 말 것]\n${priorReport()}\n\n[이번에 쓸 것: 추가 챕터]\n"## ${d.t}" 한 줄로 시작해 1,500~3,000자로 쓴다. "# 제목"은 쓰지 않는다.\n${d.p}`;
+    const user=`[네가 이미 쓴 리포트의 뼈대 — 같은 장면·인용·문장을 반복하지 말 것]\n${priorDigest()}\n\n[이번에 쓸 것: 추가 챕터]\n"## ${d.t}" 한 줄로 시작해 ${LEN().deep}로 쓴다. "# 제목"은 쓰지 않는다.\n${d.p}`;
     const ok=await runPart({text:''},user,8000,$('#deepStatus'),$('#deepErr'),`‘${d.t.slice(2).trim()}’ 쓰는 중…`);
     if(!ok)break;doneDeep.add(id);archiveSave();
   }
@@ -837,12 +955,135 @@ $('#deepBtn').onclick=async()=>{
 $('#followBtn').onclick=async()=>{
   const q=$('#followQ').value.trim();$('#deepErr').textContent='';
   if(!q||state.busy||!checkReady($('#deepErr')))return;
-  const user=`${contextBlock()}\n\n[네가 이미 쓴 리포트]\n${priorReport()}\n\n[이번에 쓸 것: 요청자의 질문에 대한 답]\n질문: ${realToAlias(q)}\n챕터 제목(#, ##) 없이 바로 본문으로, 500~1,500자로 답한다. 필요하면 말풍선 인용을 쓴다.`;
+  const user=`[네가 이미 쓴 리포트의 뼈대]\n${priorDigest()}\n\n[이번에 쓸 것: 요청자의 질문에 대한 답]\n질문: ${realToAlias(q)}\n챕터 제목(#, ##) 없이 바로 본문으로, ${LEN().follow}로 답한다. 필요하면 말풍선 인용을 쓴다.`;
   $('#followBtn').disabled=true;
   const ok=await runPart({q,text:''},user,4000,$('#deepStatus'),$('#deepErr'),'답 쓰는 중…');
   $('#followBtn').disabled=false;if(ok){$('#followQ').value='';archiveSave()}
 };
 $('#followQ').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing)$('#followBtn').click()});
+/* ========== 시상식 ========== */
+function statAwards(){
+  const st=state.stats;const L=st.list.filter(p=>p.msgs>=5);if(L.length<2)return [];
+  const txt=p=>Math.max(1,p.msgs-p.media);const top=f=>[...L].sort((a,b)=>f(b)-f(a))[0];const low=f=>[...L].sort((a,b)=>f(a)-f(b))[0];
+  const A=[];const add=(k,p,v)=>A.push(`- ${k}: ${state.alias[p.name]} (${v})`);
+  add('수다왕',top(p=>p.msgs),`메시지 ${p0(top(p=>p.msgs).msgs)}개, 전체의 ${Math.round(top(p=>p.msgs).msgs/st.total*100)}%`);
+  if(st.hasTime){
+    const i=top(p=>p.init);add('선톡 장인',i,`먼저 말 건 횟수 ${i.init}번`);
+    const R=L.filter(p=>p.reply.length>=5);
+    if(R.length>=2){const f=low(p=>R.includes(p)?p.replyMed:Infinity),s=top(p=>R.includes(p)?p.replyMed:-1);add('번개 답장',f,`답장 중앙값 ${fmtDur(f.replyMed)}`);if(s!==f)add('느긋한 답장',s,`답장 중앙값 ${fmtDur(s.replyMed)}`)}
+    const n=top(p=>p.night/p.msgs);if(n.night>=3)add('새벽 감성',n,`새벽 0~5시 메시지 ${n.night}개`);
+  }
+  const l=top(p=>p.laugh/p.msgs);if(l.laugh>=3)add('웃음 공장',l,`ㅋㅋ/ㅎㅎ ${l.laugh}번`);
+  const q=top(p=>p.q/p.msgs);if(q.q>=3)add('질문 폭격기',q,`질문 ${q.q}번`);
+  const lg=top(p=>p.chars/txt(p)),sh=low(p=>p.chars/txt(p));add('장문 작가',lg,`평균 ${Math.round(lg.chars/txt(lg))}자`);if(sh!==lg)add('단답 장인',sh,`평균 ${Math.round(sh.chars/txt(sh))}자`);
+  const md=top(p=>p.media/p.msgs);if(md.media>=3)add('짤·사진 담당',md,`사진·이모티콘 등 ${md.media}개`);
+  return A;
+}
+const p0=n=>n.toLocaleString();
+$('#awardBtn').onclick=async()=>{
+  $('#deepErr').textContent='';if(state.busy||!checkReady($('#deepErr')))return;
+  const sa=statAwards();
+  const user=`[네가 이미 쓴 리포트의 뼈대 — 같은 장면·인용·문장을 반복하지 말 것]\n${priorDigest()}\n\n[이번에 쓸 것: 우리방 시상식 챕터]
+"## 🏆 우리방 시상식" 한 줄로 시작해 ${LEN().award}로 쓴다. "# 제목"은 쓰지 않는다.
+짧은 개회사 한 문단 뒤에 상을 하나씩 수여한다. 상 하나는 반드시 이 한 줄로 시작한다:
+::award 메달이모지 | 상 이름 | 수상자 이름 | 근거 수치 또는 한 줄 근거
+그 아래에 심사평 1~2문단(캐릭터 말투, 재치 있게), 근거 말풍선 인용 1~3개, 마지막 줄에 "**수상 소감(가상):** " 뒤에 수상자가 했을 법한 한마디.
+1) 아래 [통계 기반 수상자]는 수상자와 수치를 그대로 쓴다. 상 이름은 더 웃기게 바꿔도 된다.
+2) 대화 내용을 봐야만 알 수 있는 상을 3~5개 더 만든다(예: 사과 회피상, 화제 전환상, 명언 제조기상). 반드시 근거 인용을 붙인다.
+3) 마지막은 "::award 👑 | 대상 | …" — 이 방을 가장 이 방답게 만든 사람.
+가능하면 한 사람에게 상이 몰리지 않게 고르게 준다.
+[통계 기반 수상자 — 앱이 계산한 정확한 값]
+${sa.join('\n')||'(참여자가 적어 통계 기반 상 없음 — 내용 기반 상만 수여)'}`;
+  $('#awardBtn').disabled=true;
+  const ok=await runPart({text:''},user,8000,$('#deepStatus'),$('#deepErr'),'시상식 준비 중… 🏆');
+  $('#awardBtn').disabled=false;
+  if(ok){$('#awardBtn').textContent='🏆 시상식 다시 열기';archiveSave()}
+};
+
+/* ========== 인물 카드 ========== */
+function cardScores(p){
+  const L=state.stats.list,mx=f=>Math.max(...L.map(f),1e-9),sc=v=>Math.max(4,Math.min(100,Math.round(v)));
+  const rows=[['수다력',sc(p.msgs/mx(x=>x.msgs)*100)]];
+  if(state.stats.hasTime){rows.push(['선톡력',sc(p.init/mx(x=>x.init)*100)]);
+    if(p.replyMed!=null){const sec=Math.max(1,p.replyMed/1000);rows.push(['답장 속도',sc(100-Math.log10(sec)/Math.log10(43200)*100)])}}
+  rows.push(['드립력',sc((p.laugh/p.msgs)/mx(x=>x.laugh/x.msgs)*100)]);
+  rows.push(['질문력',sc((p.q/p.msgs)/mx(x=>x.q/x.msgs)*100)]);
+  return rows;
+}
+function wrapLines(ctx,text,maxW,maxLines){
+  const out=[];let line='';
+  for(const ch of String(text)){const t=line+ch;if(ctx.measureText(t).width>maxW&&line){out.push(line);line=ch.trimStart()}else line=t}
+  if(line)out.push(line);
+  if(out.length>maxLines){out.length=maxLines;out[maxLines-1]=out[maxLines-1].replace(/.{1}$/,'…')}
+  return out;
+}
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+const SANS='-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif',SERIF='"Noto Serif KR",ui-serif,Georgia,serif';
+function layoutCard(c,d,top){
+  const W=1080,H=1920;
+  c.fillStyle='#fff';c.font=`800 104px ${SANS}`;wrapLines(c,d.name,W-180,2).forEach((l,i)=>c.fillText(l,90,top+i*120));
+  let y=top+Math.min(2,wrapLines(c,d.name,W-180,2).length)*120+10;
+  c.font=`700 62px ${SERIF}`;c.fillStyle='#ffe08a';wrapLines(c,`“${d.nick}”`,W-180,2).forEach((l,i)=>{c.fillText(l,90,y+i*78)});y+=Math.min(2,wrapLines(c,`“${d.nick}”`,W-180,2).length)*78+40;
+  c.font=`500 42px ${SANS}`;c.fillStyle='rgba(255,255,255,.9)';wrapLines(c,d.line,W-180,3).forEach((l,i)=>c.fillText(l,90,y+i*60));y+=Math.min(3,wrapLines(c,d.line,W-180,3).length)*60+60;
+  rr(c,70,y,W-140,(d.rows.length)*92+70,36);c.fillStyle='rgba(255,255,255,.07)';c.fill();y+=70;
+  for(const [k,v] of d.rows){c.font=`600 38px ${SANS}`;c.fillStyle='rgba(255,255,255,.85)';c.fillText(k,120,y+12);
+    rr(c,370,y-14,480,30,15);c.fillStyle='rgba(255,255,255,.15)';c.fill();rr(c,370,y-14,Math.max(30,480*v/100),30,15);c.fillStyle=k===d.hiddenName?'#ffe08a':'#fff';c.fill();
+    c.font=`800 40px ${SANS}`;c.fillStyle='#fff';c.textAlign='right';c.fillText(String(v),W-120,y+14);c.textAlign='left';y+=92}
+  y+=40;
+  if(d.quote){c.font=`500 44px ${SANS}`;const ql=wrapLines(c,d.quote,W-260,4);const bh=ql.length*62+70;
+    c.font=`700 30px ${SANS}`;c.fillStyle='rgba(255,255,255,.6)';c.fillText('대표 명대사',90,y);y+=24;
+    rr(c,70,y,W-140,bh,44);c.fillStyle=d.color;c.fill();c.font=`500 44px ${SANS}`;c.fillStyle='#fff';ql.forEach((l,i)=>c.fillText(l,120,y+81+i*62));y+=bh}
+  if(d.awards&&d.awards.length){y+=70;c.font=`700 30px ${SANS}`;c.fillStyle='rgba(255,255,255,.6)';c.fillText('받은 상',90,y);y+=30;
+    let x=70;c.font=`700 38px ${SANS}`;
+    for(const a of d.awards.slice(0,6)){const t=a.length>16?a.slice(0,15)+'…':a;const w=c.measureText(t).width+56;if(x+w>W-70){x=70;y+=84}
+      rr(c,x,y,w,68,34);c.fillStyle='rgba(255,224,138,.16)';c.fill();c.fillStyle='#ffe08a';c.fillText(t,x+28,y+47);x+=w+14}
+    y+=68}
+  return y;
+}
+async function drawCard(d){
+  const W=1080,H=1920,cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
+  const probe=document.createElement('canvas').getContext('2d');probe.canvas.width=W;probe.canvas.height=H;
+  const endY=layoutCard(probe,d,300);const top=300+Math.max(0,Math.min(260,(H-180-endY)/2));
+  const g=c.createLinearGradient(0,0,W,H);g.addColorStop(0,d.color);g.addColorStop(.55,'#1b1c24');g.addColorStop(1,'#0e0f14');c.fillStyle=g;c.fillRect(0,0,W,H);
+  c.globalAlpha=.08;c.fillStyle='#fff';c.beginPath();c.arc(W-120,260,320,0,7);c.fill();c.globalAlpha=1;
+  c.fillStyle='rgba(255,255,255,.75)';c.font=`600 34px ${SANS}`;c.fillText(`${S.persona}의 인물 카드`,90,150);
+  layoutCard(c,d,top);
+  c.font=`600 28px ${SANS}`;c.fillStyle='rgba(255,255,255,.45)';c.fillText('속마음 판독기 · 재미로 보는 해석이에요',90,H-90);
+  return await new Promise(r=>cv.toBlob(r,'image/png'));
+}
+state.cards=[];
+function awardsOf(name){const out=[];for(const pt of state.parts)for(const m of String(pt.text).matchAll(/^::award\s+(.*)$/gm)){const f=m[1].split('|').map(x=>x.trim());if(unalias(f[2]||'').replace(/\*\*/g,'').trim()===name)out.push(`${f[0]||'🏅'} ${unalias(f[1]||'').replace(/\s*\(.*?\)\s*/g,'').replace(/\*\*/g,'')}`)}return out}
+function cardFileName(n){return `인물카드_${n.replace(/[\\/:*?"<>|]/g,'')}.png`}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
+async function shareCard(cd){const f=new File([cd.blob],cardFileName(cd.name),{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:cd.name})}catch{}}else dl(cd.blob,f.name)}
+$('#cardBtn').onclick=async()=>{
+  $('#deepErr').textContent='';if(state.busy||!checkReady($('#deepErr')))return;
+  const user=`[네가 이미 쓴 리포트의 뼈대]\n${priorDigest()}\n\n[이번에 쓸 것: 인물 카드 데이터]
+주요 인물 최대 8명(메시지 많은 순)에 대해 한 사람당 한 줄씩, 정확히 아래 형식으로만 출력한다. 다른 텍스트·제목·설명 금지.
+@이름 | 별명(12자 이내) | 한 줄 평(35자 이내, 캐릭터 말투) | 대표 명대사(대화 원문 그대로, 40자 이내) | 숨은 능력치 이름(4자 이내, 예: 눈치, 집착, 철벽) | 0~100 정수
+리포트에서 이미 붙인 별명이 있으면 그대로 쓴다.`;
+  state.busy=true;$('#cardBtn').disabled=true;setStatus($('#deepStatus'),'인물 카드 만드는 중… 🃏');let out='';
+  try{out=await streamModel({system:state.sys||buildSystem(),prefix:state.ctx,user,maxTokens:3000,onText:t=>{out=t}})}
+  catch(e){$('#deepErr').textContent=netHint(e)}
+  finally{state.busy=false;$('#cardBtn').disabled=false;setStatus($('#deepStatus'),'')}
+  const rows=cleanOut(out).split('\n').map(l=>l.trim()).filter(l=>l.includes('|')).map(l=>l.replace(/^[-*•\s]*@?/,'').split('|').map(x=>x.trim()));
+  if(!rows.length){if(!$('#deepErr').textContent)$('#deepErr').textContent='카드 데이터를 받지 못했어요. 다시 눌러주세요.';return}
+  try{await document.fonts.load(`700 62px "Noto Serif KR"`)}catch{}
+  state.cards.forEach(c=>URL.revokeObjectURL(c.url));state.cards=[];
+  for(const r of rows.slice(0,8)){
+    const name=unalias(r[0]).replace(/\*\*/g,'').trim();const p=state.stats.list.find(x=>x.name===name);if(!p)continue;
+    const hv=Math.max(0,Math.min(100,parseInt(r[5])||50));const hn=unalias(r[4]||'숨은 능력').slice(0,6);
+    const d={awards:awardsOf(name),name,color:p.color,nick:unalias(r[1]||''),line:unalias(r[2]||''),quote:unalias(r[3]||'').replace(/^["“]|["”]$/g,''),rows:[...cardScores(p),[hn,hv]],hiddenName:hn};
+    const blob=await drawCard(d);state.cards.push({name,blob,url:URL.createObjectURL(blob)});
+  }
+  $('#cards').innerHTML=state.cards.map((c,i)=>`<figure><img src="${c.url}" alt="${esc(c.name)} 인물 카드" data-i="${i}"><figcaption><button class="ghost" data-save="${i}">저장</button><button class="ghost" data-share="${i}">공유</button></figcaption></figure>`).join('');
+  $('#cardsBox').classList.toggle('hidden',!state.cards.length);
+  if(state.cards.length)$('#cardsBox').scrollIntoView({behavior:'smooth',block:'start'});
+};
+$('#cards').onclick=e=>{const t=e.target;const c=state.cards[+(t.dataset.save??t.dataset.share??t.dataset.i)];if(!c)return;
+  if(t.dataset.save!=null)dl(c.blob,cardFileName(c.name));else if(t.dataset.share!=null)shareCard(c);else window.open(c.url,'_blank')};
+$('#saveAllCards').onclick=()=>state.cards.forEach((c,i)=>setTimeout(()=>dl(c.blob,cardFileName(c.name)),i*400));
+
 /* ========== archive ========== */
 const ARCH='sm_archive';
 function archiveSave(){
