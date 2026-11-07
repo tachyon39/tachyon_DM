@@ -138,8 +138,9 @@ svg text{fill:var(--muted);font-size:10px}
 
   <section class="card noprint">
     <h3><span class="step">2</span> 대화 넣기</h3>
-    <div class="drop" id="drop">여기를 눌러 파일 선택 · 또는 끌어다 놓기<br><span class="hint">.txt · .csv · .zip (카카오톡 / WhatsApp 내보내기)</span></div>
-    <input type="file" id="file" accept=".txt,.csv,.zip,text/plain" class="hidden">
+    <div class="drop" id="drop">여기를 눌러 파일 선택 · 또는 끌어다 놓기<br><span class="hint">카카오톡 .txt · WhatsApp .txt/.zip · 인스타그램/메신저 .json/.zip (여러 파일 한 번에 가능)</span></div>
+    <input type="file" id="file" accept=".txt,.csv,.zip,.json,text/plain,application/json" multiple class="hidden">
+    <div class="pick hidden" id="threadPick" style="margin-top:12px"></div>
     <details>
       <summary>또는 대화를 직접 붙여넣기</summary>
       <textarea id="paste" placeholder="내보낸 대화 텍스트를 붙여넣으세요"></textarea>
@@ -151,6 +152,8 @@ svg text{fill:var(--muted);font-size:10px}
         <li><b>카카오톡 모바일</b>: 채팅방 → 우측 상단 ≡ → 설정(톱니바퀴) → 대화 내용 내보내기 → 텍스트만 보내기</li>
         <li><b>카카오톡 PC</b>: 채팅방 메뉴 → 대화 내용 → 대화 내보내기 (.txt)</li>
         <li><b>WhatsApp</b>: 채팅 → 더보기 → 대화 내보내기 → 미디어 없이</li>
+        <li><b>인스타그램 DM</b>: 프로필 → ≡ → 계정 센터 → 내 정보 및 권한 → 내 정보 다운로드 → 정보 다운로드 → 일부 정보 선택 → <b>메시지</b>만 체크 → 기기로 다운로드 → 형식 <b>JSON</b>, 미디어 화질 <b>낮음</b> → 파일 만들기. 준비되면(몇 분~몇 시간) 받은 .zip을 그대로 올리세요. 메뉴 이름은 앱 버전에 따라 조금 다를 수 있어요.</li>
+        <li><b>페이스북 메신저</b>: 같은 계정 센터의 ‘내 정보 다운로드’에서 같은 방식(JSON)으로 받으면 돼요.</li>
       </ul>
     </details>
     <div class="err" id="parseErr"></div>
@@ -349,7 +352,7 @@ async function autoModel(p,k,force){
     if(force)delete S.manual[p];
     const best=pickBest(p,ids)||DEFAULT_MODEL[p];const man=S.manual[p];
     const chosen=man&&ids.includes(man)?man:best;
-    S.models[p]=chosen;saveS();if(S.provider===p){$('#model').value=chosen;modelHint(chosen,chosen===best&&!man)}
+    state.modelIds[p]=ids;S.models[p]=chosen;saveS();if(S.provider===p){$('#model').value=chosen;modelHint(chosen,chosen===best&&!man)}
     $('#keyHint').innerHTML=`<span style="color:var(--ok)">✓ ${esc(PNAME[p])} 키 정상 작동</span>`;
   }catch(e){$('#keyHint').innerHTML=`<span style="color:var(--bad)">⚠️ 키 확인 실패: ${esc(netHint(e))}</span>`}
 }
@@ -394,18 +397,18 @@ async function errOf(r){const t=await r.text();let d=null;try{d=JSON.parse(t)}ca
     else if(/referer|referrer|origin/i.test(msg))tip='\n→ 키에 웹사이트 제한이 걸려 있어요. Google Cloud 콘솔 → 사용자 인증 정보에서 이 앱을 여는 주소를 허용해 주세요.';
     else tip='\n→ 키가 맞는지, AI Studio에서 결제·프로젝트 설정이 되어 있는지 확인해 주세요.';
   }
-  return new Error(`API 오류 ${r.status}: ${msg}${tip}`)}
+  const er=new Error(`API 오류 ${r.status}: ${msg}${tip}`);er.status=r.status;return er}
 async function* sse(resp){const rd=resp.body.getReader();const dec=new TextDecoder();let buf='';while(true){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i).trim();buf=buf.slice(i+1);if(line.startsWith('data:')){const d=line.slice(5).trim();if(d&&d!=='[DONE]')yield d}}}}
 const AH=key=>({'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'});
 const TEMP=0.7; // 모델 간 편차를 줄이려고 세 회사 모두 같은 값 (OpenAI 추론 모델은 고정값이라 생략)
-async function streamModel({system,user,maxTokens,onText}){
-  const provider=S.provider,key=$('#apiKey').value.trim(),model=$('#model').value.trim();
+async function streamOnce({system,user,maxTokens,onText,model}){
+  const provider=S.provider,key=$('#apiKey').value.trim();model=model||$('#model').value.trim();
   let full='';const push=t=>{if(t){full+=t;onText(full)}};
   if(provider==='claude'){
     const body={model,max_tokens:maxTokens,stream:true,temperature:TEMP,system,messages:[{role:'user',content:user}]};
     let r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:AH(key),body:JSON.stringify(body)});
     if(!r.ok){const e=await errOf(r);if(!/temperature/i.test(e.message))throw e;delete body.temperature;r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:AH(key),body:JSON.stringify(body)});if(!r.ok)throw await errOf(r)}
-    for await(const d of sse(r)){const j=JSON.parse(d);if(j.type==='content_block_delta'&&j.delta?.type==='text_delta')push(j.delta.text);else if(j.type==='error')throw new Error('API 오류: '+(j.error?.message||''))}
+    for await(const d of sse(r)){const j=JSON.parse(d);if(j.type==='content_block_delta'&&j.delta?.type==='text_delta')push(j.delta.text);else if(j.type==='error'){const er=new Error('API 오류: '+(j.error?.message||''));er.status=/overload/i.test(j.error?.type||'')?529:500;throw er}}
     return full;
   }
   if(provider==='openai'){
@@ -429,6 +432,32 @@ async function streamModel({system,user,maxTokens,onText}){
     return full;
   }
 }
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const isBusy=e=>[429,500,502,503,504,529].includes(e.status)||/overload|high demand|UNAVAILABLE|RESOURCE_EXHAUSTED|try again later/i.test(e.message||'');
+function altModel(cur){
+  const ids=(state.modelIds[S.provider]||[]).filter(i=>i!==cur&&!state.badModels.has(i));
+  if(!ids.length)return null;
+  const fam=S.provider==='claude'?(/sonnet/.test(cur)?/sonnet/:/opus/.test(cur)?/opus/:/haiku/):S.provider==='gemini'?(/flash/.test(cur)?/flash/:/-pro|argon/):(/luna/.test(cur)?/luna/:/mini/.test(cur)?/mini/:/^gpt-/);
+  const same=ids.filter(i=>fam.test(i));
+  return pickBest(S.provider,same)||pickBest(S.provider,ids);
+}
+// 서버 혼잡(429/5xx)이면 기다렸다 재시도 → 그래도 안 되면 같은 회사의 다른 모델로 한 번 전환
+async function streamModel(opts){
+  let model=$('#model').value.trim();const waits=[3000,8000,15000];
+  for(let attempt=0;;attempt++){
+    let got=false;
+    try{return await streamOnce({...opts,model,onText:t=>{got=true;opts.onText(t)}})}
+    catch(e){
+      if(got||!isBusy(e))throw e; // 이미 일부를 받았으면 이어쓰기로 처리
+      if(attempt<waits.length){if(typeof curMsg!=='undefined')curMsg=`서버가 붐벼서 ${Math.round(waits[attempt]/1000)}초 뒤 다시 시도해요 (${attempt+1}/${waits.length})`;await sleep(waits[attempt]);continue}
+      state.badModels.add(model);const alt=altModel(model);
+      if(!alt||attempt>waits.length)throw e;
+      if(typeof curMsg!=='undefined')curMsg=`${model}이(가) 계속 붐벼서 ${alt}(으)로 바꿔서 시도해요`;
+      $('#model').value=alt;modelHint(alt,false);$('#modelHint').innerHTML=`⚠️ ${esc(model)} 서버가 붐벼서 이번에는 <b>${esc(alt)}</b>로 자동 전환했어요.`;
+      model=alt;
+    }
+  }
+}
 async function listModels(provider,key){
   if(provider==='claude'){const r=await fetch('https://api.anthropic.com/v1/models?limit=100',{headers:AH(key)});if(!r.ok)throw await errOf(r);return (await r.json()).data.map(m=>m.id)}
   if(provider==='openai'){const r=await fetch('https://api.openai.com/v1/models',{headers:{authorization:'Bearer '+key}});if(!r.ok)throw await errOf(r);return (await r.json()).data.map(m=>m.id).filter(id=>/^(gpt|o\d|chatgpt)/.test(id)&&!/audio|realtime|tts|image|embed|transcribe|search|moderation|instruct/.test(id)).sort().reverse()}
@@ -437,26 +466,92 @@ async function listModels(provider,key){
 const netHint=e=>(e.message||String(e))+(/Failed to fetch|NetworkError|Load failed/i.test(e.message)?'\n→ 네트워크 문제이거나 브라우저가 요청을 막았어요. 인터넷 연결과 키를 확인해 주세요.':'');
 
 /* ========== state & input ========== */
-const state={msgs:[],stats:null,format:'',me:null,alias:{},rev:[],sent:null,sentNorm:'',parts:[],busy:false,notes:null,deepDesc:{},rid:0};
+const state={msgs:[],stats:null,format:'',me:null,alias:{},rev:[],sent:null,sentNorm:'',parts:[],busy:false,notes:null,deepDesc:{},rid:0,modelIds:{},badModels:new Set()};
 async function decode(buf){
   if(buf[0]===0xFF&&buf[1]===0xFE)return new TextDecoder('utf-16le').decode(buf);
   let t=new TextDecoder('utf-8').decode(buf);const bad=(t.match(/�/g)||[]).length;
   if(bad>20){try{const t2=new TextDecoder('euc-kr').decode(buf);if((t2.match(/�/g)||[]).length<bad)t=t2}catch{}}
   return t;
 }
-async function readFile(file){
-  if(/\.zip$/i.test(file.name)){
-    if(!window.JSZip)throw new Error('ZIP을 열려면 인터넷 연결이 필요해요. 압축을 풀어서 .txt 파일을 올려주세요.');
-    const zip=await JSZip.loadAsync(file);const ents=Object.values(zip.files).filter(f=>!f.dir&&/\.(txt|csv)$/i.test(f.name));
-    if(!ents.length)throw new Error('ZIP 안에 대화 .txt 파일이 없어요.');
-    let best='';for(const e of ents){const t=await decode(await e.async('uint8array'));if(t.length>best.length)best=t}return best;
+/* ---- Instagram / Messenger (Meta JSON) ---- */
+function fixMeta(x){ // Meta 내보내기는 UTF-8 바이트를 한 글자씩 저장해서 한글이 깨짐 → 복원
+  if(typeof x!=='string'||!/[\u0080-ÿ]/.test(x))return x;
+  for(let i=0;i<x.length;i++)if(x.charCodeAt(i)>255)return x;
+  try{return new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(x,c=>c.charCodeAt(0)))}catch{return x}
+}
+const META_SYS=/^(Reacted |Liked a message|.*reacted .* to your message|.*메시지에 반응|.*좋아요를 눌렀습니다|.*님이 대화방에 참여|.*님이 그룹에 추가|.*changed the group|.*named the group|.*joined the video chat|.*started a video chat|.*started an audio call)/i;
+function metaMsgs(j){
+  const out=[];
+  for(const m of j.messages||[]){
+    const sender=fixMeta(m.sender_name||'');if(!sender)continue;
+    let text=fixMeta(m.content||''),media=false;
+    if(m.is_unsent)text='(보낸 메시지를 취소함)';
+    else if(!text){media=true;text=m.photos?'사진':m.videos?'동영상':m.audio_files?'음성메시지':m.gifs?'GIF':m.sticker?'이모티콘':m.share?'공유한 게시물/링크':m.files?'파일':'';if(!text)continue}
+    else if(m.share&&/sent an attachment|첨부 파일을 보냈습니다/i.test(text)){media=true;text='공유한 게시물/링크'}
+    if(!media&&META_SYS.test(text))continue;
+    if(m.share?.share_text&&!media)text+=` [공유: ${fixMeta(m.share.share_text).slice(0,80)}]`;
+    out.push({ts:m.timestamp_ms||null,sender:sender.trim(),text:text.trim(),media});
   }
-  return decode(new Uint8Array(await file.arrayBuffer()));
+  return out;
+}
+function isMetaJSON(j){return j&&Array.isArray(j.messages)&&Array.isArray(j.participants)}
+function addMetaThread(threads,key,j){
+  const t=threads[key]??={title:fixMeta(j.title||''),people:(j.participants||[]).map(p=>fixMeta(p.name)).filter(Boolean),msgs:[]};
+  t.msgs.push(...metaMsgs(j));
+}
+async function readSources(files){
+  // 반환: {texts:[...], threads:{key:{title,people,msgs}}}
+  const texts=[],threads={};let sawHtml=false;
+  for(const file of files){
+    const name=file.name;
+    if(/\.zip$/i.test(name)){
+      if(!window.JSZip)throw new Error('ZIP을 열려면 인터넷 연결이 필요해요. 압축을 풀어서 안의 파일을 올려주세요.');
+      const zip=await JSZip.loadAsync(file);const ents=Object.values(zip.files).filter(f=>!f.dir);
+      const metas=ents.filter(f=>/message_\d+\.json$/i.test(f.name));
+      if(metas.length){for(const e of metas){try{const j=JSON.parse(await e.async('string'));if(isMetaJSON(j))addMetaThread(threads,e.name.replace(/\/[^/]+$/,''),j)}catch{}}continue}
+      if(ents.some(f=>/message_\d+\.html$/i.test(f.name)))sawHtml=true;
+      let best='';for(const e of ents.filter(f=>/\.(txt|csv)$/i.test(f.name))){const t=await decode(await e.async('uint8array'));if(t.length>best.length)best=t}
+      if(best)texts.push(best);continue;
+    }
+    if(/\.json$/i.test(name)){
+      let j;try{j=JSON.parse(await file.text())}catch{throw new Error(`${name}: JSON 파일을 읽지 못했어요.`)}
+      if(!isMetaJSON(j))throw new Error(`${name}: 인스타그램/메신저 대화 파일이 아니에요. inbox 폴더 안의 message_1.json 같은 파일을 올려주세요.`);
+      addMetaThread(threads,j.thread_path||j.title||name,j);continue;
+    }
+    if(/\.html?$/i.test(name)){sawHtml=true;continue}
+    texts.push(await decode(new Uint8Array(await file.arrayBuffer())));
+  }
+  if(!texts.length&&!Object.keys(threads).length&&sawHtml)throw new Error('HTML 형식으로 받은 파일이에요. 인스타그램 ‘내 정보 다운로드’에서 형식을 JSON으로 바꿔 다시 받아주세요.');
+  return {texts,threads};
+}
+async function handleFiles(fileList){
+  $('#parseErr').textContent='';$('#threadPick').classList.add('hidden');
+  try{
+    const files=[...fileList];if(!files.length)return;
+    $('#parseErr').textContent='파일 읽는 중…';
+    const {texts,threads}=await readSources(files);$('#parseErr').textContent='';
+    const list=Object.values(threads).filter(t=>t.msgs.length).map(t=>{t.msgs.sort((a,b)=>(a.ts||0)-(b.ts||0));return t}).sort((a,b)=>b.msgs.length-a.msgs.length);
+    if(list.length===1)return loadMsgs(list[0].msgs,'인스타그램 / 메신저',list[0].title);
+    if(list.length>1){
+      state.threads=list;
+      $('#threadPick').innerHTML=`<div class="hint" style="margin:0">대화방이 ${list.length}개 있어요. 분석할 방을 골라주세요.</div>`+list.slice(0,60).map((t,i)=>`<label><input type="radio" name="thread" value="${i}"><div>${esc(t.title||t.people.join(', '))}<small>${esc(t.people.slice(0,6).join(', '))}${t.people.length>6?` 외 ${t.people.length-6}명`:''} · 메시지 ${t.msgs.length.toLocaleString()}개</small></div></label>`).join('');
+      $('#threadPick').classList.remove('hidden');
+      $('#threadPick').querySelectorAll('input').forEach(r=>r.onchange=()=>{const t=state.threads[+r.value];loadMsgs(t.msgs,'인스타그램 / 메신저',t.title)});
+      return;
+    }
+    if(texts.length)return loadText(texts.sort((a,b)=>b.length-a.length)[0]);
+    $('#parseErr').textContent='읽을 수 있는 대화를 찾지 못했어요.';
+  }catch(err){$('#parseErr').textContent=err.message}
 }
 function loadText(text){
-  $('#parseErr').textContent='';
   const {msgs,format}=parseChat(text);
-  if(msgs.length<5){$('#parseErr').textContent='대화를 거의 인식하지 못했어요. 카카오톡/WhatsApp에서 내보낸 원본 텍스트인지 확인해 주세요.';return}
+  loadMsgs(msgs,format);
+}
+function loadMsgs(msgs,format,title){
+  $('#parseErr').textContent='';
+  if(msgs.length<5){$('#parseErr').textContent='대화를 거의 인식하지 못했어요. 카카오톡·WhatsApp·인스타그램에서 내보낸 원본 파일인지 확인해 주세요.';return}
+  if(title)format+=` · ${title}`;
+
   Object.assign(state,{msgs,format,stats:computeStats(msgs),me:null,parts:[]});
   const st=state.stats;
   $('#parseSummary').innerHTML=`<span class="chip">${esc(format)}</span> <span class="chip">메시지 ${st.total.toLocaleString()}개</span> <span class="chip">${st.list.length}명</span>${st.hasTime?` <span class="chip">${fmtDate(st.first)} ~ ${fmtDate(st.last)}</span>`:''}`;
@@ -471,11 +566,11 @@ function loadText(text){
 }
 const drop=$('#drop');
 drop.onclick=()=>$('#file').click();
-$('#file').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{loadText(await readFile(f))}catch(err){$('#parseErr').textContent=err.message}};
+$('#file').onchange=e=>{handleFiles(e.target.files);e.target.value=''};
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',async e=>{const f=e.dataTransfer.files[0];if(!f)return;try{loadText(await readFile(f))}catch(err){$('#parseErr').textContent=err.message}});
-$('#usePaste').onclick=()=>loadText($('#paste').value);
+drop.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
+$('#usePaste').onclick=()=>{$('#threadPick').classList.add('hidden');loadText($('#paste').value)};
 ['budget','anon','mask'].forEach(id=>$('#'+id).onchange=updateSendInfo);
 
 /* ========== transcript ========== */
@@ -652,7 +747,7 @@ function reportHTML(streaming){
   return `<article class="rpaper"><div class="rbody">${body}</div>${streaming?'':stats+foot}</article>`;
 }
 let rafPending=false;
-function paint(streaming){if(streaming){if(rafPending)return;rafPending=true;requestAnimationFrame(()=>{rafPending=false;$('#report').innerHTML=reportHTML(true)})}else $('#report').innerHTML=reportHTML(false)}
+function paint(streaming){if(!state.parts.length){$('#report').innerHTML='';return}if(streaming){if(rafPending)return;rafPending=true;requestAnimationFrame(()=>{rafPending=false;$('#report').innerHTML=reportHTML(true)})}else $('#report').innerHTML=reportHTML(false)}
 
 /* ========== run ========== */
 let timer=null;
@@ -696,7 +791,7 @@ $('#run').onclick=async()=>{
   finally{state.busy=false;setStatus($('#status'),'')}
   if(!prepOk){$('#run').disabled=false;return}
   const ok=await runPart({text:''},`${contextBlock()}\n\n${MAIN_PLAN}`,16000,$('#status'),$('#runErr'),`${state.notes?'2단계: ':''}${S.persona}가 리포트를 쓰는 중…`);
-  if(ok&&state.parts[0])await repairMain(state.parts[0]);
+  if(state.parts[0]?.text){if(!ok)$('#runErr').textContent+='\n→ 써둔 부분은 살려서 이어서 쓸게요.';await repairMain(state.parts[0]);if(!missingParts(state.parts[0].text).length)$('#runErr').textContent=''}
   $('#run').disabled=false;
   if(state.parts.length){state.deepDesc=parseDeep(state.parts[0].text);renderDeep();$('#deepCard').classList.remove('hidden');archiveSave()}
   if(ok)$('#report').scrollIntoView({behavior:'smooth',block:'start'});
