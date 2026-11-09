@@ -105,6 +105,8 @@ svg text{fill:var(--muted);font-size:10px}
 .cards img{width:100%;border-radius:12px;display:block;cursor:pointer;box-shadow:var(--shadow)}
 .cards figcaption{display:flex;gap:6px;margin-top:6px}
 .cards figcaption button{flex:1;padding:7px 6px;font-size:13px}
+.reuse{font-size:12.5px;color:var(--muted);border-left:3px solid var(--line);padding:3px 10px;margin:2px 0}
+.bub.draft{background:transparent;border:1.5px dashed var(--accent);color:var(--ink)}
 @media print{.noprint{display:none!important}body{background:#fff}.rpaper{border:0}}
 </style>
 </head>
@@ -187,12 +189,14 @@ svg text{fill:var(--muted);font-size:10px}
       <option value="mild">🌶 순한 맛 — 단톡방에 공유해도 안전</option>
       <option value="medium">🌶🌶 보통 맛</option>
       <option value="hot">🌶🌶🌶 매운 맛 — 각오하고 보기</option>
+      <option value="hell">🔥 지옥 맛 — 욕설·비하 허용 (성인용)</option>
     </select>
     <label for="lengthSel">리포트 길이</label>
     <select id="lengthSel">
       <option value="normal">보통 — 6~9천 자 (원본과 비슷)</option>
       <option value="short">짧게 — 3~4.5천 자 (출력 비용 약 절반)</option>
     </select>
+    <div class="hint hidden" id="hellHint">🔥 지옥 맛: 욕 섞인 술자리 로스트예요. 단톡방이나 당사자에게 그대로 공유하는 건 비추천이에요. 패드립·외모 비하·혐오 욕설·성적 표현은 이 단계에서도 안 나와요.</div>
     <label for="question">특히 궁금한 것 <span class="hint">(선택)</span></label>
     <input type="text" id="question" placeholder="예) 이번 싸움 누가 잘못한 거야? / 걔 나한테 관심 있어?">
     <label for="budget">읽을 분량</label>
@@ -289,18 +293,19 @@ function parseChat(raw){
     const out=[];for(const r of parseCSV(text).slice(1)){if(r.length<3)continue;const ts=Date.parse(r[0].trim().replace(' ','T'));out.push(mkMsg(isNaN(ts)?null:ts,r[1],r.slice(2).join(',')))}
     return {msgs:out.filter(m=>m.sender),format:'카카오톡 (Mac CSV)'};
   }
-  const ord=detectWaOrder(lines);const ctx={date:null,last:null};const msgs=[];const hits={};
+  const ord=detectWaOrder(lines);const ctx={date:null,last:null};const msgs=[];const hits={};const events=[];let lastTs=null;
+  const addEv=t=>{t=t.replace(/^[\s:,\-]+/,'').trim();if(t&&SYS_RE.test(t))events.push({ts:lastTs,after:msgs.length,text:t})};
   for(const line of lines){
     if(!line.trim())continue;
     let matched=false;
     for(const p of PATTERNS){const m=line.match(p.re);if(!m)continue;const r=p.f(m,ctx,ord);if(!r)continue;matched=true;
       if(r.date){ctx.date=r.date;ctx.last=null}
-      else if(r.system){ctx.last=null}
-      else{const msg=mkMsg(r.ts,r.sender,r.text);if(msg.sender){msgs.push(msg);ctx.last=msg;hits[p.label]=(hits[p.label]||0)+1}}
+      else if(r.system){ctx.last=null;addEv(line.replace(/^.*?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?\s?[Mm]\.?)?\]?,?\s*-?\s*/,''))}
+      else{const msg=mkMsg(r.ts,r.sender,r.text);if(msg.sender){msgs.push(msg);ctx.last=msg;if(msg.ts)lastTs=msg.ts;hits[p.label]=(hits[p.label]||0)+1}}
       break}
-    if(!matched&&ctx.last&&!SYS_RE.test(line))ctx.last.text+='\n'+line.trim();
+    if(!matched){if(SYS_RE.test(line))addEv(line);else if(ctx.last)ctx.last.text+='\n'+line.trim()}
   }
-  if(msgs.length){const format=Object.entries(hits).sort((a,b)=>b[1]-a[1])[0][0];return {msgs,format}}
+  if(msgs.length){const format=Object.entries(hits).sort((a,b)=>b[1]-a[1])[0][0];return {msgs,format,events}}
   // fallback: "이름: 메시지"
   const gen=[];let last=null;
   for(const line of lines){if(!line.trim())continue;const m=line.match(/^(.{1,30}?)\s?[:：]\s(.+)$/);if(m){last=mkMsg(null,m[1],m[2]);gen.push(last)}else if(last)last.text+='\n'+line.trim()}
@@ -419,7 +424,7 @@ $('#tier').onchange=e=>{S.tier=e.target.value;saveS();const k=$('#apiKey').value
 $('#persona').oninput=e=>{S.persona=e.target.value.trim()||'제이';saveS()};
 $('#style').onchange=e=>{S.style=e.target.value;saveS()};
 $('#lengthSel').value=S.length;$('#lengthSel').onchange=e=>{S.length=e.target.value;saveS();updateSendInfo()};
-$('#spice').value=S.spice;$('#spice').onchange=e=>{S.spice=e.target.value;saveS()};
+$('#spice').value=S.spice;$('#hellHint').classList.toggle('hidden',S.spice!=='hell');$('#spice').onchange=e=>{S.spice=e.target.value;saveS();$('#hellHint').classList.toggle('hidden',S.spice!=='hell')};
 $('#toggleKey').onclick=()=>{const k=$('#apiKey');k.type=k.type==='password'?'text':'password';$('#toggleKey').textContent=k.type==='password'?'보기':'숨기기'};
 $('#remember').checked=S.remember;$('#persona').value=S.persona;$('#style').value=S.style;
 $('#model').value=S.models[S.provider]||DEFAULT_MODEL[S.provider];
@@ -459,7 +464,8 @@ async function streamOnce(o){
 async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}){
   const provider=S.provider,key=$('#apiKey').value.trim();model=model||$('#model').value.trim();
   const whole=prefix?prefix+'\n\n'+user:user;
-  let full='';const push=t=>{if(t){full+=t;onText(full)}};const U={inp:0,cr:0,cw:0,out:0};
+  let full='';const push=t=>{if(t){full+=t;onText(full)}};const U={inp:0,cr:0,cw:0,out:0};state.lastStop='ok';
+  const stop=r=>{if(!r)return;const x=String(r).toLowerCase();state.lastStop=/max_tokens|length/.test(x)?'length':/safety|content_filter|refusal|prohibited|blocklist|recitation/.test(x)?'safety':'ok'};
   if(provider==='claude'){
     const body={model,max_tokens:maxTokens,stream:true,temperature:SP().temp,
       system:[{type:'text',text:system,cache_control:{type:'ephemeral'}}],
@@ -470,7 +476,7 @@ async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}
     for await(const d of sse(r)){const j=JSON.parse(d);
       if(j.type==='content_block_delta'&&j.delta?.type==='text_delta')push(j.delta.text);
       else if(j.type==='message_start'){const u=j.message?.usage||{};U.inp=u.input_tokens||0;U.cr=u.cache_read_input_tokens||0;U.cw=u.cache_creation_input_tokens||0;U.out=u.output_tokens||0}
-      else if(j.type==='message_delta'&&j.usage){U.out=j.usage.output_tokens||U.out}
+      else if(j.type==='message_delta'){if(j.usage)U.out=j.usage.output_tokens||U.out;stop(j.delta?.stop_reason)}
       else if(j.type==='error'){const er=new Error('API 오류: '+(j.error?.message||''));er.status=/overload/i.test(j.error?.type||'')?529:500;throw er}}
     onUsage&&onUsage(U,model);return full;
   }
@@ -481,16 +487,16 @@ async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}
     const r=await postJSON('https://api.openai.com/v1/chat/completions',H,body,strips);
     const take=u=>{if(!u)return;const c=u.prompt_tokens_details?.cached_tokens||0;U.cr=c;U.inp=(u.prompt_tokens||0)-c;U.out=u.completion_tokens||0};
     if(!body.stream){const d=await r.json();push(d.choices?.[0]?.message?.content||'');take(d.usage);onUsage&&onUsage(U,model);return full}
-    for await(const d of sse(r)){const j=JSON.parse(d);push(j.choices?.[0]?.delta?.content||'');take(j.usage)}
+    for await(const d of sse(r)){const j=JSON.parse(d);push(j.choices?.[0]?.delta?.content||'');stop(j.choices?.[0]?.finish_reason);take(j.usage)}
     onUsage&&onUsage(U,model);return full;
   }
   if(provider==='gemini'){
     const body={systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:prefix?[{text:prefix},{text:user}]:[{text:user}]}],
       generationConfig:{maxOutputTokens:maxTokens*2,thinkingConfig:{thinkingLevel:'low'}},
-      safetySettings:['HARM_CATEGORY_HARASSMENT','HARM_CATEGORY_HATE_SPEECH','HARM_CATEGORY_SEXUALLY_EXPLICIT','HARM_CATEGORY_DANGEROUS_CONTENT'].map(category=>({category,threshold:'BLOCK_ONLY_HIGH'}))};
+      safetySettings:[['HARM_CATEGORY_HARASSMENT',S.spice==='hell'?'BLOCK_NONE':'BLOCK_ONLY_HIGH'],['HARM_CATEGORY_HATE_SPEECH','BLOCK_ONLY_HIGH'],['HARM_CATEGORY_SEXUALLY_EXPLICIT','BLOCK_ONLY_HIGH'],['HARM_CATEGORY_DANGEROUS_CONTENT','BLOCK_ONLY_HIGH']].map(([category,threshold])=>({category,threshold}))};
     const r=await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,{'content-type':'application/json','x-goog-api-key':key},body,
       [{re:/thinking/i,del:b=>{if(!b.generationConfig.thinkingConfig)return false;delete b.generationConfig.thinkingConfig;return true}}]);
-    for await(const d of sse(r)){const j=JSON.parse(d);push((j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join(''));
+    for await(const d of sse(r)){const j=JSON.parse(d);push((j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join(''));stop(j.candidates?.[0]?.finishReason);
       const u=j.usageMetadata;if(u){U.cr=u.cachedContentTokenCount||0;U.inp=(u.promptTokenCount||0)-U.cr;U.out=(u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0)}}
     if(!full)throw new Error('Gemini가 빈 응답을 보냈어요. 다른 모델로 시도해 보세요.');
     onUsage&&onUsage(U,model);return full;
@@ -621,10 +627,11 @@ async function handleFiles(fileList){
   }catch(err){$('#parseErr').textContent=err.message}
 }
 function loadText(text){
-  const {msgs,format}=parseChat(text);
-  loadMsgs(msgs,format);
+  const {msgs,format,events}=parseChat(text);
+  loadMsgs(msgs,format,'',events);
 }
-function loadMsgs(msgs,format,title){
+function loadMsgs(msgs,format,title,events){
+  state.events=events||[];
   $('#parseErr').textContent='';
   if(msgs.length<5){$('#parseErr').textContent='대화를 거의 인식하지 못했어요. 카카오톡·WhatsApp·인스타그램에서 내보낸 원본 파일인지 확인해 주세요.';return}
   if(title)format+=` · ${title}`;
@@ -651,9 +658,18 @@ $('#usePaste').onclick=()=>{$('#threadPick').classList.add('hidden');loadText($(
 ['budget','anon','mask'].forEach(id=>$('#'+id).onchange=updateSendInfo);
 
 /* ========== transcript ========== */
+// 가명은 실명과 받침 종류(없음/ㄹ/그 외)를 맞춘다 → AI가 쓴 조사(이/가, 은/는, 으로/로)가 실명으로 바꿔도 맞음
+const ALIAS_SYL={none:'수주리소미라희호유세후효래오비무기계',jong:'갑병정경신임춘혁민강봉곤탁석욱현준영훈진범승택환섭웅항덕빈찬',rieul:'솔별달설철열결슬늘율'};
+function jongClass(name){const c=String(name).trim().slice(-1).charCodeAt(0);if(!(c>=0xAC00&&c<=0xD7A3))return 'none';const j=(c-0xAC00)%28;return j===0?'none':j===8?'rieul':'jong'}
 function makeAliases(){
-  state.alias={};const L='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  state.stats.list.forEach((p,i)=>{state.alias[p.name]=$('#anon').checked?('인물'+(i<26?L[i]:(i+1))):p.name});
+  state.alias={};const used=new Set(),anon=$('#anon').checked;
+  if(state.joinedFor!==state.msgs){state.joined=state.msgs.map(m=>m.text).join('\n');state.joinedFor=state.msgs}
+  const free=c=>!used.has(c)&&!state.joined.includes(c);
+  state.stats.list.forEach(p=>{
+    if(!anon){state.alias[p.name]=p.name;return}
+    const pool=[...ALIAS_SYL[jongClass(p.name)]];let a=pool.map(ch=>'인물'+ch).find(free);
+    for(let n=2;!a;n++)a=pool.map(ch=>`인물${n}${ch}`).find(free);
+    used.add(a);state.alias[p.name]=a});
   state.rev=Object.entries(state.alias).filter(([r,a])=>r!==a).map(([r,a])=>[a,r]).sort((x,y)=>y[0].length-x[0].length);
 }
 const realToAlias=s=>{if(!$('#anon').checked)return s;let o=s;Object.entries(state.alias).sort((a,b)=>b[0].length-a[0].length).forEach(([r,a])=>{if(r.length>=2)o=o.split(r).join(a)});return o};
@@ -668,21 +684,44 @@ const hm=t=>{const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinutes
 const MAXMSG=400,GROUP_MS=10*60e3;
 const squeeze=s=>s.replace(/https?:\/\/\S+/g,'[링크]').replace(/([ㅋㅎㅠㅜㄷ])\1{3,}/g,'$1$1$1').replace(/([!?.~♡♥])\1{3,}/g,'$1$1$1').replace(/(\p{Extended_Pictographic})\1{2,}/gu,'$1$1').replace(/[ \t]{2,}/g,' ').trim();
 const mediaLabel=t=>'['+t.replace(/[<>]/g,'').replace(/\s*(읽지 않음|omitted|없음|제외됨)\s*/gi,'').replace(/^Media$/i,'미디어').trim()+']';
+const GAP_MARK=3*3600e3;
 function entries(){
-  const out=[];let cur=null;
-  for(const m of state.msgs){
+  const out=[];let cur=null,lastTs=null,ei=0;const ev=state.events||[];
+  const pushEv=e=>{out.push({raw:true,day:e.ts?dayKey(e.ts):'',n:0,text:`${e.ts?hm(e.ts)+' ':''}(알림: ${realToAlias(e.text)})`});cur=null};
+  state.msgs.forEach((m,mi)=>{
+    while(ei<ev.length&&(ev[ei].after??0)<=mi)pushEv(ev[ei++]);
     let body=m.media?mediaLabel(m.text):squeeze(maskText(realToAlias(m.text))).replace(/\n+/g,' / ');
-    if(!body)continue;
+    if(!body)return;
     if(body.length>MAXMSG)body=body.slice(0,MAXMSG)+'…(생략)';
     const who=state.alias[m.sender],day=m.ts?dayKey(m.ts):'';
+    if(m.ts&&lastTs&&m.ts-lastTs>=GAP_MARK&&dayKey(lastTs)===day){out.push({raw:true,day,n:0,text:`(— ${Math.round((m.ts-lastTs)/3600e3)}시간 뒤 —)`});cur=null}
+    if(m.ts)lastTs=m.ts;
     if(cur&&cur.who===who&&cur.day===day&&(!m.ts||!cur.last||m.ts-cur.last<=GROUP_MS)){
       const lp=cur.parts[cur.parts.length-1];
       if(m.media&&lp.replace(/×\d+$/,'')===body){const n=(+(lp.match(/×(\d+)$/)||[0,1])[1])+1;cur.parts[cur.parts.length-1]=`${body}×${n}`}
       else cur.parts.push(body);
-      cur.last=m.ts||cur.last;cur.n++;continue}
+      cur.last=m.ts||cur.last;cur.n++;return}
     cur={who,day,time:m.ts?hm(m.ts):'',last:m.ts,parts:[body],n:1};out.push(cur);
+  });
+  while(ei<ev.length)pushEv(ev[ei++]);
+  return out.map(e=>e.raw?e:({day:e.day,n:e.n,text:`${e.time?e.time+' ':''}${e.who}: ${e.parts.join(' / ')}`}));
+}
+/* ---- 호칭 대응표: 대화 속에서 부르는 이름 → 참여자 (겹치는 이름은 경고) ---- */
+const SURNAMES='김이박최정강조윤장임한오서신권황안송류유전홍고문양손배백허남심노하곽성차주우구민진나지엄채원천방공현함변염여추도소석선설마길연위표명기반왕금옥육인맹제모탁국어은편용예봉경사부';
+function nicknameLegend(){
+  const HON=/\s*(선배님|선배|누나|언니|오빠|형님|형|쌤|님|씨)$/;
+  const nick=new Map();
+  for(const p of state.stats.list){
+    const base=p.name.replace(HON,'').trim();const c=[];
+    if(/^[가-힣]{3}$/.test(base)&&SURNAMES.includes(base[0]))c.push(base.slice(1));       // 김다영 → 다영
+    if(base!==p.name&&/^[가-힣]{2,4}$/.test(base))c.push(base);                          // 민주누나 → 민주
+    for(const k of c)(nick.get(k)||nick.set(k,new Set()).get(k)).add(state.alias[p.name]);
   }
-  return out.map(e=>({day:e.day,n:e.n,text:`${e.time?e.time+' ':''}${e.who}: ${e.parts.join(' / ')}`}));
+  const txt=state.joined||'';const lines=[];
+  for(const [k,set] of nick){const n=txt.split(k).length-1;if(!n)continue;
+    const who=[...set];
+    lines.push(who.length>1?`- "${k}" (${n}회) → ${who.join(', ')} 중 한 명. 둘 다 "${k}"(으)로 불리니 문맥·시간으로 누구인지 구분하고, 확실하지 않으면 단정하지 말 것`:`- "${k}" (${n}회) → ${who[0]}`)}
+  return lines.length?`[호칭 대응표 — 메시지 본문 속 호칭(○○아, ○○이, ○○ 누나 등)이 가리키는 화자]\n${lines.join('\n')}\n`:'';
 }
 function materialize(list){let d=null;const o=[];for(const e of list){if(e.gap){o.push(e.gap);d=null;continue}if(e.day&&e.day!==d){o.push(`[${e.day}]`);d=e.day}o.push(e.text)}return o.join('\n')}
 const rawChars=()=>state.msgs.reduce((a,m)=>a+(m.ts?17:0)+m.sender.length+2+m.text.length+1,0); // 압축 전(예전 방식) 글자 수
@@ -704,6 +743,12 @@ function buildTranscript(budgetOverride){
   return {text:materialize(out),used,total,sampled:true};
 }
 const CHUNK=90000,FULL_SAMPLE=60000;
+function buildSpeakerIndex(){ // 원문 메시지 → 실제로 말한 사람(가명). 말풍선 화자 바로잡기용
+  const idx=new Map();
+  for(const m of state.msgs){if(m.media)continue;const who=state.alias[m.sender];
+    for(const piece of squeeze(maskText(realToAlias(m.text))).split(/\n+|\s+\/\s+/)){const k=normQ(piece);if(k.length<3)continue;(idx.get(k)||idx.set(k,new Set()).get(k)).add(who)}}
+  state.speakIdx=idx;
+}
 function chunkTexts(){makeAliases();const E=entries();const out=[];let cur=[],c=0;for(const e of E){if(c+e.text.length>CHUNK&&cur.length){out.push(materialize(cur));cur=[];c=0}cur.push(e);c+=e.text.length+1}if(cur.length)out.push(materialize(cur));return out}
 function updateSendInfo(){if(!state.msgs.length)return;
   if($('#budget').value==='full'){const ch=chunkTexts();const tot=ch.reduce((a,c)=>a+c.length,0);
@@ -758,10 +803,20 @@ const SPICE={
 - 요청자도 예외 없다. 오히려 요청자를 제일 먼저, 제일 세게 태운다.
 - 금지: 칭찬으로 시작하기, 놀린 직후 수습하기("물론 ~도 좋은 점이야", "그래도 진심은 따뜻해"), "귀엽다·사랑스럽다·사랑둥이·속은 여린" 같은 쿠션 단어. 따뜻한 말은 ✍️ 마지막으로 챕터의 마지막 두 문장에서만 딱 한 번 허용한다.`,
     r3:'관찰은 정확하게, 해석은 확신 있게 세게 말한다. "~일 수도", "~처럼 보여" 같은 완충어는 챕터당 한 번 이하. 근거가 약한 해석은 아예 쓰지 말고, 쓸 거면 단정적으로.',
-    r4:'맵게 쓰되 넘지 않는 선이 있다. 외모·몸·가족·출신·성별·성적 지향처럼 본인이 바꿀 수 없는 것, 욕설·혐오 표현, 실제 고통(질병·상실·정말 힘든 사정)은 소재로 쓰지 않는다. 대신 행동·말버릇·허세·핑계·자기합리화·모순은 사정없이 태운다.',
+    r4:'맵게 쓰되 넘지 않는 선이 있다. 외모·몸·가족·출신·성별·성적 지향처럼 본인이 바꿀 수 없는 것, 욕설·혐오 표현, 실제 고통(질병·상실·돈 문제 같은 정말 힘든 사정)은 소재로 쓰지 않는다. 사람을 규정하는 낙인도 금지: 지능 비하(멍청하다, 지능 문제), 정신건강·병리 용어(관심병, 사이코, 사디즘, 가스라이팅, ○○장애), 사람이 아니다·짐승 같은 비인간화. 행동·말버릇·허세·핑계·자기합리화·모순은 사정없이 태우되, 사람의 존재 자체를 깎지는 않는다.',
     fair:'한쪽만 몰아세우지 않는다. 모두를 공평하게, 골고루 태운다.',
     end:'판결문처럼 냉정한 최종 판정을 내린다. 형량·죄목 같은 비유도 좋다. 마지막 두 문장에서만 진심 한마디.',temp:0.9}
 };
+SPICE.hell={label:'지옥 맛 (성인용, 욕설 허용)',
+  tone:`술자리에서 십년지기 친구 놈들 까듯이, 욕을 섞어서 거침없이 태운다. 요청자가 성인용 최고 수위를 직접 골랐다. 점잖으면 실패다.
+- 욕설을 자연스럽게 섞는다(씨발, 존나, 개-, 미친, 좆같은, ㅅㅂ 등). 매 문단 억지로 넣지 말고, 펀치라인이 터지는 자리에 리듬 있게.
+- 행동·성격 비하 허용: 찌질이, 호구, 관종, 빡대가리, 허세 덩어리, 등신 같은 말도 써도 된다. 대신 반드시 대화 근거에 붙여서.
+- 매운 맛의 규칙(문단마다 펀치라인, 인용 뒤 한 줄 자막, 숫자로 조롱, 쿠션 금지, 요청자부터 태우기)은 그대로.
+- 따뜻한 말은 ✍️ 마지막으로 챕터의 마지막 두 문장에서만. 그것도 욕 섞인 츤데레로.`,
+  r3:SPICE.hot.r3,
+  r4:'지옥 맛에서도 절대 안 쓰는 것: 패드립(부모·가족 욕), 외모·몸 비하, 장애·성별·성적 지향·출신·지역을 겨냥한 혐오 표현과 혐오 욕설(병신·애자·한남·김치녀·홍어 같은 말 포함), 성적인 표현, 실제 고통(질병·상실·돈 문제), 협박·폭력 조장. 이건 수위가 아니라 사람을 진짜 다치게 하는 영역이다.',
+  fair:'한쪽만 몰아세우지 않는다. 모두를 공평하게, 골고루 태운다.',
+  end:'욕 섞인 최종 판결을 내린다. 죄목·형량 비유 좋다. 마지막 두 문장에서만 츤데레 진심.',temp:1.0};
 const EXAMPLE={
   gentle:`[문체 예시 — 형식·밀도·리듬만 참고. 이 예시의 이름·내용은 절대 쓰지 말 것]
 ### 장면 2: "괜찮아"가 세 번 나온 밤 🌙
@@ -779,7 +834,14 @@ const EXAMPLE={
 공지 올린 손이랑 과제 미룬 손이 같은 손이야. **서진아, 넌 리더가 아니라 알람 시계야. 남들은 깨우고 본인은 스누즈 누르는.**
 메시지 412개 중에 질문이 87개. 그중 답이 달린 게 몇 개인지 세어봤니? 내가 셌어. 19개야. **이 방에서 네 질문은 질문이 아니라 배경음악이야.**
 > 서진: 아 저 진짜 이번엔 열심히 할게요
-이 문장, 이 방에서만 네 번째야. 넌 다짐을 하는 게 아니라 다짐을 연재하고 있어.`
+이 문장, 이 방에서만 네 번째야. 넌 다짐을 하는 게 아니라 다짐을 연재하고 있어.`,
+  hell:`[문체 예시 — 지옥 맛의 강도·리듬만 참고. 이 예시의 이름·내용은 절대 쓰지 말 것]
+### 장면 2: 정산의 신, 입금의 반대말 💸
+> 태호: 엔빵 계좌 올림 오늘까지 ㄱㄱ
+> 준서: 월급날 보냄
+> 준서: 아 근데 나 알바 안 하잖아
+씨발 이게 진짜 대화냐 ㅋㅋㅋ **준서야, 넌 월급날을 기다리는 게 아니라 기적을 기다리고 있어.** 알바도 안 하는 새끼가 월급날 타령하는 거 실화냐.
+메시지 391개 중에 "보냄"이 11번 나오는데 실제 입금 인증은 0번. 존나 일관성 하나는 국가대표급이다. **이 방에서 네 계좌는 은행 계좌가 아니라 블랙홀이야.**`
 };
 const SP=()=>SPICE[S.spice]||SPICE.medium;
 function buildSystem(){
@@ -790,10 +852,10 @@ function buildSystem(){
 
 원칙:
 1. 반드시 대화에 실제로 있는 근거로 말한다. 주장마다 실제 메시지를 말풍선 인용(> 이름: 메시지)으로 보여준다. 인용은 원문 그대로, 없는 문장을 지어내지 않는다. 각 챕터에 인용을 2번 이상 넣는다.
-2. 메시지 하나가 아니라 전체 흐름을 본다: 누가 먼저 말을 거는지, 답장 속도, 질문, 말투와 톤 변화, 반복되는 말버릇과 농담, 갈등이 터지고 풀리는 과정.
+2. 메시지 하나가 아니라 전체 흐름을 본다: 누가 먼저 말을 거는지, 답장 속도, 질문, 말투와 톤 변화, 반복되는 말버릇과 농담, 갈등이 터지고 풀리는 과정. 단톡방은 여러 대화가 동시에 섞인다. 누가 누구에게 한 말인지는 바로 앞 메시지가 아니라 호칭·내용·시간으로 판단하고, 확실하지 않으면 단정하지 않는다. 본문 속 호칭은 호칭 대응표로 사람과 연결한다.
 3. ${SP().r3}
 4. ${SP().r4} 통제·위협·폭력·자해 암시 같은 위험 신호가 보이면 맵기와 상관없이 농담 없이 진지하게 짚고 도움을 구할 곳을 권한다.
-5. 함께 주어진 통계 수치는 정확하니 활용하되, 수치를 지어내지 않는다.
+5. 함께 주어진 통계 수치는 정확하니 활용하되, 수치를 지어내지 않는다. 대화에 없는 사실(돈 사정·집안·건강·연애 같은 사생활)도 지어내지 않는다. 속마음·'실제로 하고 싶었던 말' 추정도 대화에 드러난 맥락 안에서만 한다.
 6. 대화 언어와 무관하게 한국어로 쓴다. 사람 이름은 대화에 표시된 그대로 쓴다(가명이면 가명 그대로).
 7. 요청자가 지정되어 있으면 요청자를 이름으로 부르며 "너"라고 2인칭으로 쓴다. 지정되지 않았으면 대화 참여자 모두("너희")에게 말하듯 쓴다.
 8. 반복 금지. 같은 메시지는 전체에서 한 번만 인용한다. 같은 사건은 한 곳에서만 깊게 다루고, 다른 곳에서 다시 언급할 땐 한 문장 이내로 짧게. 같은 결론·같은 비유·같은 숫자를 되풀이하지 않는다. 모든 문단은 앞에 없던 새 정보(새 장면, 새 인용, 새 숫자, 새 관점)를 하나 이상 담는다.
@@ -801,7 +863,7 @@ function buildSystem(){
 
 ${FORMAT}
 
-${S.spice==='hot'?EXAMPLE.hot:EXAMPLE.gentle}`;
+${EXAMPLE[S.spice]||EXAMPLE.gentle}`;
 }
 const LEN=()=>S.length==='short'?{main:'본문 전체 3,000~4,500자 분량으로 쓴다. 분량 배분(대략): 도입 300자 · 자화상 인물당 350자 · 장면 하나당 350자 · 속뜻 번역 500자 · 안 보이는 것 400자 · 마지막 200자.',scenes:'2~3개',trans:'2~3개',deep:'800~1,500자',award:'1,200~2,000자',follow:'300~800자'}
   :{main:'본문 전체 6,000~9,000자 분량으로 쓴다. 분량 배분(대략): 도입 600자 · 자화상 인물당 700자 · 장면 하나당 600자 · 속뜻 번역 1,000자 · 안 보이는 것 800자 · 마지막 400자.',scenes:'3~5개',trans:'3~5개',deep:'1,500~3,000자',award:'2,000~4,000자',follow:'500~1,500자'};
@@ -845,7 +907,7 @@ const DEEP=[
   {id:'misread',t:'🙈 사람들이 너를 오해하는 지점',d:'의도와 다르게 읽히는 말버릇과 행동',p:'요청자(없으면 주요 인물들)가 의도와 다르게 읽히는 지점 3~5개. 각각 "### " 소제목, 인용, 왜 그렇게 읽히는지, 어떻게 하면 의도대로 전달되는지.'},
   {id:'ksst',t:'✅ 계속할 것 · 멈출 것 · 시작할 것',d:'이 대화에서 보인 모습 중 지킬 것과 버릴 것',p:'"### 계속할 것", "### 멈출 것", "### 시작할 것" 세 소제목으로, 각 2~3개씩 구체적인 행동을 근거 인용과 함께 쓴다.'},
   {id:'other',t:'🔄 상대 입장에서 다시 읽기',d:'같은 대화를 상대의 눈으로 다시 본다',p:'요청자의 상대(단톡방이면 요청자와 가장 많이 부딪힌 사람)의 시점에서 같은 대화를 다시 읽는다. 상대가 느꼈을 감정의 흐름을 장면별로 쓴다.'},
-  {id:'script',t:'📝 다음 대화, 이렇게 꺼내봐',d:'실제로 보낼 수 있는 메시지 초안',p:'지금 상황에서 요청자가 실제로 보낼 수 있는 메시지 초안 2~3가지(서로 다른 접근)를 "> 요청자이름: 메시지" 말풍선 형식으로 쓰고, 각각 어떤 반응을 끌어낼지와 주의점을 쓴다.'},
+  {id:'script',t:'📝 다음 대화, 이렇게 꺼내봐',d:'실제로 보낼 수 있는 메시지 초안',p:'앞에서 인용한 대화를 다시 보여주지 말고, 지금 상황에서 요청자가 실제로 보낼 수 있는 메시지 초안 2~3가지(서로 다른 접근)를 "> 요청자이름: 메시지" 말풍선 형식으로 쓰고, 각각 어떤 반응을 끌어낼지와 주의점을 쓴다.'},
 ];
 function statsForPrompt(){
   const st=state.stats;
@@ -859,7 +921,8 @@ function contextBlock(){
 [기간] ${st.hasTime?fmtDate(st.first)+' ~ '+fmtDate(st.last):'시간 정보 없음'}
 [분량] 전체 메시지 ${t.total}개 중 ${t.used}개 포함${t.sampled?' (긴 대화라 시기별로 고르게 뽑았고 중간은 생략됨)':''}
 [원문 표기법] [YYYY-MM-DD 요일]은 날짜, 각 줄은 "시각 이름: 메시지". 같은 사람이 10분 안에 연달아 보낸 메시지는 " / "로 이어 붙였고 [사진]×3은 사진 3장. 말풍선으로 인용할 때는 " / " 사이의 메시지 하나를 "> 이름: 메시지" 한 줄로 쓰고, 연달아 보낸 메시지 여러 개를 보여주려면 > 줄을 여러 개 쓴다. " / "를 인용 안에 넣지 않는다.
-[참여자 통계 — 앱이 직접 계산한 정확한 수치]
+(— N시간 뒤 —)는 대화가 한동안 끊겼다가 새로 시작된 지점이니 앞뒤를 한 흐름으로 이어 읽지 않는다. (알림: …)은 입장·퇴장 같은 시스템 알림. [사진]·[동영상] 등 미디어의 내용은 볼 수 없으니 추측하지 않는다.
+${nicknameLegend()}[참여자 통계 — 앱이 직접 계산한 정확한 수치]
 ${statsForPrompt()}
 
 ${state.notes&&state.notes.length?`[1단계 구간 노트 — 대화 전체를 ${state.notes.length}개 구간으로 나눠 미리 읽은 기록. 전체 흐름은 이 노트를 기준으로 파악할 것]\n${state.notes.map((n,i)=>`--- 구간 ${i+1} ---\n${n}`).join('\n\n')}\n\n[대화 원문 발췌 — 시기별로 고르게 뽑은 부분]`:'[대화 원문]'}
@@ -876,11 +939,25 @@ function cleanOut(t){
   const m=t.match(/(^|\n)#{1,2} /);if(m&&m.index>0&&m.index<400)t=t.slice(m.index+m[1].length); // 앞 인사말 제거
   return t;
 }
-function renderMarkup(md){
+let SEENQ=null;
+function renderMarkup(md,opts={}){
   md=cleanOut(String(md)).split('[[DEEP')[0].replace(/\[\[?[A-Z\/]{0,5}$/,'');
   let h='',para=[],bub=[],list=[];
   const fp=()=>{if(para.length){h+=`<p>${para.map(inline).join(' ')}</p>`;para=[]}};
-  const fb=()=>{if(!bub.length)return;let prev=null;h+='<div class="chat">';for(const b0 of bub){for(const piece of String(b0.text).split(/\s+\/\s+/).map(x=>x.trim()).filter(Boolean)){const b={who:b0.who,text:piece};const real=unalias(b.who).trim();const mine=state.me&&real===state.me;if(real!==prev)h+=`<div class="who${mine?' r':''}">${esc(real)}</div>`;const ok=normQ(b.text).length<2||state.sentNorm.includes(normQ(b.text));h+=`<div class="bub${mine?' me':''}">${inline(b.text)}${ok?'':'<span class="nv" title="원문과 정확히 일치하지 않는 인용">≈</span>'}</div>`;prev=real}}h+='</div>';bub=[]};
+  const fb=()=>{if(!bub.length)return;let prev=null,reuse=[];h+='<div class="chat">';
+    const flushReuse=()=>{if(!reuse.length)return;const f=reuse[0];h+=`<div class="reuse">↩ 앞에서 본 메시지 · ${esc(f.who)}: “${inline(f.text.length>24?f.text.slice(0,24)+'…':f.text)}”${reuse.length>1?` 외 ${reuse.length-1}개`:''}</div>`;reuse=[];prev=null};
+    for(const b0 of bub)for(const piece of String(b0.text).split(/\s+\/\s+/).map(x=>x.trim()).filter(Boolean)){
+      const k=normQ(piece);let who=b0.who.trim();
+      const sp=state.speakIdx&&k.length>=3?state.speakIdx.get(k):null;
+      if(sp&&!sp.has(who)&&sp.size===1)who=[...sp][0]; // 화자가 틀렸으면 원문 기준으로 바로잡음
+      const real=unalias(who).trim();const mine=state.me&&real===state.me;
+      const ok=k.length<2||state.sentNorm.includes(k);
+      if(ok&&SEENQ&&k.length>=4){if(SEENQ.has(k)){reuse.push({who:real,text:piece});continue}SEENQ.add(k)}
+      flushReuse();
+      const draft=!ok&&opts.draft;
+      if(real!==prev)h+=`<div class="who${mine?' r':''}">${draft?'초안 · ':''}${esc(real)}</div>`;
+      h+=`<div class="bub${mine?' me':''}${draft?' draft':''}">${inline(piece)}${ok||draft?'':'<span class="nv" title="원문과 정확히 일치하지 않는 인용">≈</span>'}</div>`;prev=real}
+    flushReuse();h+='</div>';bub=[]};
   const fl=()=>{if(!list.length)return;let out='<ul>',depth=0;list.forEach((it,i)=>{const d=Math.min(it.d,depth+1);if(d>depth){out=out.replace(/<\/li>$/,'')+'<ul>'}else if(d<depth){out+='</ul></li>'}out+=`<li>${inline(it.t)}</li>`;depth=d});while(depth-->0)out+='</ul></li>';h+=out+'</ul>';list=[]};
   let inAward=false;const ca=()=>{if(inAward){h+='</div>';inAward=false}};
   const fa=()=>{fp();fb();fl()};
@@ -901,9 +978,11 @@ function renderMarkup(md){
 function reportHTML(streaming){
   const P=PERSONA[S.style]||PERSONA.roast;
   const head=`<div class="persona"><div class="av">${avatarSVG(S.style)}</div><div><b>${esc(S.persona)}</b><span>${esc(P.tag)}</span></div></div>
-  <div class="rtools noprint"><button class="ghost" onclick="saveHtml()">⤓ 리포트 저장</button><button class="ghost" onclick="window.print()">인쇄 / PDF</button></div>
-  <div class="rnote">원본 대화는 이 브라우저에서만 처리되고, 선택한 AI API로만 전송됐어요. 말풍선 옆 ≈ 표시는 원문과 정확히 일치하지 않는 인용이에요.</div>`;
-  let body=state.parts.map(p=>p.q?`<div class="chap"><div class="ico">💬</div><h2>${esc(p.q)}</h2><div class="dv">— ◆ —</div></div>`+renderMarkup(p.text):renderMarkup(p.text)).join('');
+  <div class="rtools noprint"><button class="ghost" onclick="saveHtml(this)">⤓ 리포트 저장</button><button class="ghost" onclick="window.print()">인쇄 / PDF</button></div>
+  <div class="rnote">원본 대화는 이 브라우저에서만 처리되고, 선택한 AI API로만 전송됐어요. 말풍선 옆 ≈ 표시는 원문과 정확히 일치하지 않는 인용, 점선 말풍선은 AI가 써 준 초안이에요.</div>`;
+  SEENQ=new Set();
+  let body=state.parts.map(p=>p.q?`<div class="chap"><div class="ico">💬</div><h2>${esc(p.q)}</h2><div class="dv">— ◆ —</div></div>`+renderMarkup(p.text):renderMarkup(p.text,{draft:p.kind==='script'})).join('');
+  SEENQ=null;
   if(body.includes('<!--HEAD-->'))body=body.replace('<!--HEAD-->',head);else body=head+body;
   if(streaming)body+='<span class="caret"></span>';
   const stats=`<details class="rstats"><summary>📊 숫자로 보기 (AI 없이 계산)</summary>${statsHTML(state.stats)}</details>`;
@@ -925,7 +1004,13 @@ function checkReady(errEl){
 async function runPart(part,user,maxTokens,statusEl,errEl,label,prefix=state.ctx){
   state.parts.push(part);state.busy=true;setStatus(statusEl,label);
   const below=statusEl.id==='deepStatus'?' — 위쪽 리포트 끝에 이어 써지고 있어요 ↑':'';
-  try{await streamModel({system:state.sys||buildSystem(),prefix,user,maxTokens,onText:t=>{part.text=t;const planning=/\[\[PLAN\]\]/.test(t)&&!/\[\[\/PLAN\]\]/.test(t);curMsg=planning?`${curBase} · 전체 흐름 구상 중`:`${curBase} · ${cleanOut(t).split('[[DEEP')[0].length.toLocaleString()}자${below}`;paint(true)}});return true}
+  const onT=t=>{part.text=t;const planning=/\[\[PLAN\]\]/.test(t)&&!/\[\[\/PLAN\]\]/.test(t);curMsg=planning?`${curBase} · 전체 흐름 구상 중`:`${curBase} · ${cleanOut(t).split('[[DEEP')[0].length.toLocaleString()}자${below}`;paint(true)};
+  try{await streamModel({system:state.sys||buildSystem(),prefix,user,maxTokens,onText:onT});
+    if(state.lastStop==='length'&&part.kind!=='main'&&part.text){ // 토큰 한도로 잘렸으면 한 번 이어쓰기
+      const base=part.text;curBase=`${label} · 이어 쓰는 중`;
+      await streamModel({system:state.sys||buildSystem(),prefix,user:`${user}\n\n[네가 쓰던 내용 — 끊긴 곳 바로 다음 글자부터 이어서 쓴다. 앞 내용 반복 금지]\n${base}`,maxTokens,onText:t=>onT(base+t)})}
+    if(state.lastStop==='safety')errEl.textContent='AI 회사의 안전 필터 때문에 중간에 멈췄어요. 맵기를 한 단계 낮추거나 다른 회사 키로 시도해 보세요. (지옥 맛은 회사마다 허용 수위가 달라요)';
+    return true}
   catch(e){errEl.textContent=netHint(e);if(!part.text)state.parts.pop();return false}
   finally{state.busy=false;setStatus(statusEl,'');paint(false)}
 }
@@ -955,8 +1040,9 @@ $('#run').onclick=async()=>{
   }catch(e){$('#runErr').textContent=netHint(e);prepOk=false}
   finally{state.busy=false;setStatus($('#status'),'')}
   if(!prepOk){$('#run').disabled=false;return}
+  buildSpeakerIndex();
   state.sys=buildSystem();state.ctx=contextBlock(); // 이후 모든 호출에서 바이트 단위로 같은 앞부분 → 캐시 적중
-  const ok=await runPart({text:''},`${mainPlan()}`,16000,$('#status'),$('#runErr'),`${state.notes?'2단계: ':''}${S.persona}가 리포트를 쓰는 중…`);
+  const ok=await runPart({text:'',kind:'main'},`${mainPlan()}`,16000,$('#status'),$('#runErr'),`${state.notes?'2단계: ':''}${S.persona}가 리포트를 쓰는 중…`);
   if(state.parts[0]?.text){if(!ok)$('#runErr').textContent+='\n→ 써둔 부분은 살려서 이어서 쓸게요.';await repairMain(state.parts[0]);if(!missingParts(state.parts[0].text).length)$('#runErr').textContent=''}
   $('#run').disabled=false;
   if(state.parts.length){state.deepDesc=parseDeep(state.parts[0].text);renderDeep();$('#deepCard').classList.remove('hidden');archiveSave()}
@@ -988,7 +1074,7 @@ function renderDeep(){
   $('#deepList').innerHTML=DEEP.map(d=>{const dn=doneDeep.has(d.id);const desc=state.deepDesc?.[d.id]?unalias(state.deepDesc[d.id]):d.d;return `<label><input type="checkbox" value="${d.id}" ${dn?'disabled':'checked'}><div>${d.t}${dn?' <span class="chip">읽음</span>':''}<small>${esc(desc)}</small></div></label>`}).join('');
   $('#deepBtn').textContent=left?`계속 → (${left}개 남음)`:'모두 읽었어요';$('#deepBtn').disabled=!left;
 }
-function priorDigest(){ // 이미 쓴 리포트 전문 대신 뼈대(제목·소제목·상·굵은 핵심 문장)만
+function digestParts(){ // 이미 쓴 리포트 전문 대신 뼈대(제목·소제목·상·굵은 핵심 문장)만
   const out=[];
   for(const p of state.parts){if(p.q)out.push(`## 💬 질문: ${p.q}`);
     for(const l of cleanOut(p.text).split('[[DEEP')[0].split('\n')){const t=l.trim();
@@ -998,12 +1084,14 @@ function priorDigest(){ // 이미 쓴 리포트 전문 대신 뼈대(제목·소
   // 이미 인용한 메시지 (다시 쓰지 말 것)
   const seen=new Set(),quotes=[];
   for(const p of state.parts)for(const l of cleanOut(p.text).split('\n')){const m=l.match(/^\s*>\s*([^:：]{1,30})[:：]\s*(.+)$/);if(!m)continue;
-    for(const piece of m[2].split(/\s+\/\s+/)){const k=normQ(piece);if(k.length<2||seen.has(k))continue;seen.add(k);quotes.push(`${m[1].trim()}: ${piece.trim().slice(0,30)}`)}}
-  if(quotes.length)s+=`\n\n[이미 인용한 메시지 — 다시 인용 금지]\n${quotes.slice(-80).join('\n')}`;
+    for(const piece of m[2].split(/\s+\/\s+/)){const k=normQ(piece);if(k.length<2||seen.has(k))continue;seen.add(k);const sp=state.speakIdx?.get(k);quotes.push(`${sp&&sp.size===1?[...sp][0]:m[1].trim()}: ${piece.trim().slice(0,30)}`)}}
   const plan=state.parts[0]?parsePlan(state.parts[0].text):'';
-  if(plan)s+=`\n\n[메인 리포트 구상표 — '예비' 에피소드와 아직 깊게 다루지 않은 시기를 우선 활용할 것]\n${plan}`;
-  return s;
+  return {skel:s,quotes:quotes.slice(-100),plan};
 }
+function priorDigest(){const d=digestParts();let s=d.skel;
+  if(d.quotes.length)s+=`\n\n[이미 인용한 메시지 — 다시 인용 금지]\n${d.quotes.join('\n')}`;
+  if(d.plan)s+=`\n\n[메인 리포트 구상표 — '예비' 에피소드와 아직 깊게 다루지 않은 시기를 우선 활용할 것]\n${d.plan}`;
+  return s}
 const priorReport=()=>state.parts.map(p=>(p.q?`## 💬 ${p.q}\n`:'')+p.text).join('\n\n');
 $('#deepBtn').onclick=async()=>{
   $('#deepErr').textContent='';if(state.busy||!checkReady($('#deepErr')))return;
@@ -1011,8 +1099,14 @@ $('#deepBtn').onclick=async()=>{
   if(!ids.length){$('#deepErr').textContent='읽고 싶은 챕터를 하나 이상 골라주세요.';return}
   $('#deepBtn').disabled=true;
   for(const id of ids){const d=DEEP.find(x=>x.id===id);
-    const user=`[네가 이미 쓴 리포트의 뼈대 — 같은 장면·인용·문장을 반복하지 말 것]\n${priorDigest()}\n\n[이번에 쓸 것: 추가 챕터]\n"## ${d.t}" 한 줄로 시작해 ${LEN().deep}로 쓴다. "# 제목"은 쓰지 않는다.\n${d.p}`;
-    const ok=await runPart({text:''},user,8000,$('#deepStatus'),$('#deepErr'),`‘${d.t.slice(2).trim()}’ 쓰는 중…`);
+    const g=digestParts();
+    const user=`[네가 이미 쓴 리포트의 뼈대]\n${g.skel}${g.plan?`\n\n[메인 리포트 구상표]\n${g.plan}`:''}\n\n[이번에 쓸 것: 추가 챕터]\n"## ${d.t}" 한 줄로 시작해 ${LEN().deep}로 쓴다. "# 제목"은 쓰지 않는다.\n${d.p}
+\n[반드시 지킬 것 — 반복 금지]
+- 아래 목록의 메시지는 다시 말풍선으로 인용하지 않는다. 그 장면이 꼭 필요하면 인용 없이 한 문장으로만 짧게 언급한다.
+- 이 챕터의 인용은 아직 한 번도 인용하지 않은 새 메시지로 채운다. 구상표의 '예비' 에피소드, 앞에서 덜 다룬 시기와 인물부터 찾는다.
+- 앞 챕터에서 이미 한 결론·비유·평가를 되풀이하지 않는다. 이 챕터만의 새 발견을 쓴다.
+${g.quotes.length?`[이미 인용한 메시지 — 재인용 금지]\n${g.quotes.join('\n')}`:''}`;
+    const ok=await runPart({text:'',kind:id},user,8000,$('#deepStatus'),$('#deepErr'),`‘${d.t.slice(2).trim()}’ 쓰는 중…`);
     if(!ok)break;doneDeep.add(id);archiveSave();
   }
   $('#deepBtn').disabled=false;renderDeep();
@@ -1167,7 +1261,8 @@ $('#archiveList').onclick=e=>{const o=e.target.closest('[data-open]'),d=e.target
   if(o){const x=list.find(y=>String(y.id)===o.dataset.open);if(!x)return;$('#report').innerHTML=x.html+'<div class="notice noprint">보관함에서 연 리포트예요. 더 깊이 읽기·질문을 하려면 대화 파일을 다시 올려 새로 분석해 주세요.</div>';$('#deepCard').classList.add('hidden');$('#statsCard').classList.add('hidden');$('#report').scrollIntoView({behavior:'smooth',block:'start'})}
   if(d&&confirm('이 리포트를 보관함에서 지울까요?')){store.set(ARCH,list.filter(y=>String(y.id)!==d.dataset.del));renderArchive()}};
 renderArchive();
-function saveHtml(){
+function saveHtml(btn){
+  if(state.busy){if(btn){const t=btn.textContent;btn.textContent='⏳ 아직 쓰는 중이에요';setTimeout(()=>btn.textContent=t,2500)}return}
   const css=document.querySelector('style').textContent;
   const html=`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>판독 리포트</title><link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap" rel="stylesheet"><style>${css}</style></head><body><main class="wrap">${$('#report').innerHTML}</main></body></html>`;
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));const d=new Date();a.download=`판독리포트_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.html`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
