@@ -154,7 +154,21 @@ svg text{fill:var(--muted);font-size:10px}
   <section class="card noprint">
     <h3><span class="step">2</span> 대화 넣기</h3>
     <div class="drop" id="drop">여기를 눌러 파일 선택 · 또는 끌어다 놓기<br><span class="hint">카카오톡 .txt · WhatsApp .txt/.zip · 인스타그램/메신저 .json/.zip (여러 파일 한 번에 가능)</span></div>
-    <input type="file" id="file" accept=".txt,.csv,.zip,.json,text/plain,application/json" multiple class="hidden">
+    <input type="file" id="file" accept=".txt,.csv,.zip,.json,text/plain,application/json,video/*,image/*" multiple class="hidden">
+    <div class="hint" style="text-align:center;margin-top:8px">📱 인스타 DM 등은 <b>화면 녹화 영상</b>이나 <b>스크린샷 여러 장</b>도 돼요 (1단계 API 키 필요)</div>
+    <div class="card hidden" id="visBox" style="margin-top:12px;box-shadow:none">
+      <h3 style="margin-bottom:6px">🎞 화면 녹화 읽기</h3>
+      <div class="status" id="visStatus" style="margin-top:0"></div>
+      <div class="err" id="visErr"></div>
+      <div id="visReview" class="hidden">
+        <div id="visSummary"></div>
+        <label>이름 확인 <span class="hint">— 잘못 읽힌 이름은 고치세요. 같은 이름으로 바꾸면 한 사람으로 합쳐져요</span></label>
+        <div id="visNames" class="pick"></div>
+        <label>미리보기 <span class="hint">(처음과 끝)</span></label>
+        <div id="visPreview" style="font-size:13px;line-height:1.55;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:260px;overflow:auto;white-space:pre-wrap"></div>
+        <div class="row" style="margin-top:12px"><button class="btn" id="visUse">이대로 분석 준비 →</button></div>
+      </div>
+    </div>
     <div class="pick hidden" id="threadPick" style="margin-top:12px"></div>
     <details>
       <summary>또는 대화를 직접 붙여넣기</summary>
@@ -168,6 +182,7 @@ svg text{fill:var(--muted);font-size:10px}
         <li><b>카카오톡 PC</b>: 채팅방 메뉴 → 대화 내용 → 대화 내보내기 (.txt)</li>
         <li><b>WhatsApp</b>: 채팅 → 더보기 → 대화 내보내기 → 미디어 없이</li>
         <li><b>인스타그램 DM</b>: 프로필 → ≡ → 계정 센터 → 내 정보 및 권한 → 내 정보 다운로드 → 정보 다운로드 → 일부 정보 선택 → <b>메시지</b>만 체크 → 기기로 다운로드 → 형식 <b>JSON</b>, 미디어 화질 <b>낮음</b> → 파일 만들기. 준비되면(몇 분~몇 시간) 받은 .zip을 그대로 올리세요. 메뉴 이름은 앱 버전에 따라 조금 다를 수 있어요.</li>
+        <li><b>화면 녹화 (인스타·라인·아이메시지 등 아무 앱)</b>: 화면 녹화를 켜고, 대화방 맨 위(또는 맨 아래)에서 시작해 <b>천천히, 한 화면씩 멈췄다가</b> 스크롤하세요. 너무 빨리 넘기면 글자가 흐려서 못 읽어요. 몇백 개 메시지까지 권장해요.</li>
         <li><b>페이스북 메신저</b>: 같은 계정 센터의 ‘내 정보 다운로드’에서 같은 방식(JSON)으로 받으면 돼요.</li>
       </ul>
     </details>
@@ -323,7 +338,7 @@ function computeStats(msgs){
     if(/ㅋㅋ|ㅎㅎ|haha|lol|😂|🤣/i.test(m.text))p.laugh++;
     if(m.ts){const d=new Date(m.ts);const h=d.getHours();hours[h]++;if(h<5)p.night++;const k=`${d.getFullYear()}-${pad(d.getMonth()+1)}`;(monthly[k]??={})[m.sender]=(monthly[k][m.sender]||0)+1}
     if(!prev||(m.ts&&prev.ts&&m.ts-prev.ts>=GAP))p.init++;
-    if(prev&&prev.sender!==m.sender&&m.ts&&prev.ts){const d=m.ts-prev.ts;if(d>=0&&d<12*3600e3)p.reply.push(d)}
+    if(prev&&prev.sender!==m.sender&&m.ts&&prev.ts&&!m.approx){const d=m.ts-prev.ts;if(d>=0&&d<12*3600e3)p.reply.push(d)}
     prev=m;
   }
   const list=Object.values(people).sort((a,b)=>b.msgs-a.msgs);
@@ -461,15 +476,16 @@ async function streamOnce(o){
   catch(e){if(e.name==='AbortError'){const er=new Error('응답이 한동안 멈춰서 연결을 끊었어요.');er.status=504;throw er}throw e}
   finally{WD.stop();WD=null}
 }
-async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}){
+async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage,images,temp}){
+  const IMG=images||[];
   const provider=S.provider,key=$('#apiKey').value.trim();model=model||$('#model').value.trim();
   const whole=prefix?prefix+'\n\n'+user:user;
   let full='';const push=t=>{if(t){full+=t;onText(full)}};const U={inp:0,cr:0,cw:0,out:0};state.lastStop='ok';
   const stop=r=>{if(!r)return;const x=String(r).toLowerCase();state.lastStop=/max_tokens|length/.test(x)?'length':/safety|content_filter|refusal|prohibited|blocklist|recitation/.test(x)?'safety':'ok'};
   if(provider==='claude'){
-    const body={model,max_tokens:maxTokens,stream:true,temperature:SP().temp,
+    const body={model,max_tokens:maxTokens,stream:true,temperature:temp??SP().temp,
       system:[{type:'text',text:system,cache_control:{type:'ephemeral'}}],
-      messages:[{role:'user',content:prefix?[{type:'text',text:prefix,cache_control:{type:'ephemeral'}},{type:'text',text:user}]:user}]};
+      messages:[{role:'user',content:IMG.length?[...IMG.map(d=>({type:'image',source:{type:'base64',media_type:'image/jpeg',data:d}})),{type:'text',text:user}]:prefix?[{type:'text',text:prefix,cache_control:{type:'ephemeral'}},{type:'text',text:user}]:user}]};
     const r=await postJSON('https://api.anthropic.com/v1/messages',AH(key),body,[
       {re:/temperature/i,del:b=>'temperature' in b&&delete b.temperature},
       {re:/cache_control|cache/i,del:b=>{let hit=false;if(Array.isArray(b.system)){b.system=b.system[0].text;hit=true}const c=b.messages[0].content;if(Array.isArray(c)){b.messages[0].content=c.map(x=>x.text).join('\n\n');hit=true}return hit}}]);
@@ -482,7 +498,7 @@ async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}
   }
   if(provider==='openai'){
     const H={'content-type':'application/json','authorization':'Bearer '+key};
-    const body={model,messages:[{role:'system',content:system},{role:'user',content:whole}],max_completion_tokens:maxTokens*2,stream:true,stream_options:{include_usage:true},reasoning_effort:'low',prompt_cache_key:'soksaem-'+(state.rid||0)};
+    const body={model,messages:[{role:'system',content:system},{role:'user',content:IMG.length?[{type:'text',text:whole},...IMG.map(d=>({type:'image_url',image_url:{url:'data:image/jpeg;base64,'+d,detail:'high'}}))]:whole}],max_completion_tokens:maxTokens*2,stream:true,stream_options:{include_usage:true},reasoning_effort:'low',prompt_cache_key:'soksaem-'+(state.rid||0)};
     const strips=[{re:/reasoning/i,del:b=>'reasoning_effort' in b&&delete b.reasoning_effort},{re:/prompt_cache_key/i,del:b=>'prompt_cache_key' in b&&delete b.prompt_cache_key},{re:/stream_options/i,del:b=>'stream_options' in b&&delete b.stream_options},{re:/stream/i,del:b=>{if(!b.stream)return false;delete b.stream;delete b.stream_options;return true}}];
     const r=await postJSON('https://api.openai.com/v1/chat/completions',H,body,strips);
     const take=u=>{if(!u)return;const c=u.prompt_tokens_details?.cached_tokens||0;U.cr=c;U.inp=(u.prompt_tokens||0)-c;U.out=u.completion_tokens||0};
@@ -491,7 +507,7 @@ async function streamOnceRaw({system,prefix,user,maxTokens,onText,model,onUsage}
     onUsage&&onUsage(U,model);return full;
   }
   if(provider==='gemini'){
-    const body={systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:prefix?[{text:prefix},{text:user}]:[{text:user}]}],
+    const body={systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:IMG.length?[...IMG.map(d=>({inline_data:{mime_type:'image/jpeg',data:d}})),{text:user}]:prefix?[{text:prefix},{text:user}]:[{text:user}]}],
       generationConfig:{maxOutputTokens:maxTokens*2,thinkingConfig:{thinkingLevel:'low'}},
       safetySettings:[['HARM_CATEGORY_HARASSMENT',S.spice==='hell'?'BLOCK_NONE':'BLOCK_ONLY_HIGH'],['HARM_CATEGORY_HATE_SPEECH','BLOCK_ONLY_HIGH'],['HARM_CATEGORY_SEXUALLY_EXPLICIT','BLOCK_ONLY_HIGH'],['HARM_CATEGORY_DANGEROUS_CONTENT','BLOCK_ONLY_HIGH']].map(([category,threshold])=>({category,threshold}))};
     const r=await postJSON(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,{'content-type':'application/json','x-goog-api-key':key},body,
@@ -529,7 +545,7 @@ async function streamModel(opts){
   let model=$('#model').value.trim();const waits=[3000,8000,15000];
   for(let attempt=0;;attempt++){
     let got=false;
-    try{return await streamOnce({...opts,model,onText:t=>{got=true;opts.onText(t)},onUsage:addUsage})}
+    try{return await streamOnce({...opts,model,onText:t=>{got=true;opts.onText(t)},onUsage:opts.onUsage||addUsage})}
     catch(e){
       if(got||!isBusy(e))throw e; // 이미 일부를 받았으면 이어쓰기로 처리
       if(attempt<waits.length){if(typeof curMsg!=='undefined')curMsg=`${curBase} · ${e.status===504?'응답이 멈춰서':'서버가 붐벼서'} ${Math.round(waits[attempt]/1000)}초 뒤 다시 시도 (${attempt+1}/${waits.length})`;await sleep(waits[attempt]);curMsg=`${curBase} · 다시 시도하는 중 (${attempt+1}/${waits.length})`;continue}
@@ -611,6 +627,9 @@ async function handleFiles(fileList){
   $('#parseErr').textContent='';$('#threadPick').classList.add('hidden');
   try{
     const files=[...fileList];if(!files.length)return;
+    const vis=files.filter(isVisual);
+    if(vis.length)return readVisual(vis);
+    $('#visBox').classList.add('hidden');
     $('#parseErr').textContent='파일 읽는 중…';
     const {texts,threads}=await readSources(files);$('#parseErr').textContent='';
     const list=Object.values(threads).filter(t=>t.msgs.length).map(t=>{t.msgs.sort((a,b)=>(a.ts||0)-(b.ts||0));return t}).sort((a,b)=>b.msgs.length-a.msgs.length);
@@ -626,6 +645,155 @@ async function handleFiles(fileList){
     $('#parseErr').textContent='읽을 수 있는 대화를 찾지 못했어요.';
   }catch(err){$('#parseErr').textContent=err.message}
 }
+/* ========== 화면 녹화 / 스크린샷 읽기 ========== */
+const isVisual=f=>/^(video|image)\//.test(f.type)||/\.(mp4|mov|m4v|webm|3gp|jpe?g|png|webp|heic|heif)$/i.test(f.name);
+const VIS={W:720,BATCH:6,MAXF:140,CONC:3};
+let visRun=0;
+function thumbOf(src,tw=48,th=104){const c=document.createElement('canvas');c.width=tw;c.height=th;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(src,0,0,tw,th);const d=x.getImageData(0,0,tw,th).data;const g=new Float32Array(tw*th);for(let i=0;i<g.length;i++)g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)/255;return g}
+const tdiff=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=Math.abs(a[i]-b[i]);return s/a.length};
+function jpegOf(src,w,h){const sc=Math.min(1,VIS.W/w);const c=document.createElement('canvas');c.width=Math.round(w*sc);c.height=Math.round(h*sc);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.82).split(',')[1]}
+async function framesFromVideo(file,run){
+  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(file);
+  try{
+    await new Promise((ok,no)=>{v.onloadeddata=ok;v.onerror=()=>no(new Error('이 영상을 브라우저가 열지 못했어요. (아이폰 HEVC .mov는 일부 브라우저에서 안 열려요 — 스크린샷으로 올리거나, 사진 앱에서 "호환성 우선"으로 다시 녹화해 보세요)'));setTimeout(()=>no(new Error('영상을 여는 데 너무 오래 걸려요.')),20000)});
+    const dur=v.duration;if(!isFinite(dur)||dur<=0)throw new Error('영상 길이를 알 수 없어요.');
+    const step=Math.min(1,Math.max(.3,dur/450));const seek=t=>new Promise(r=>{v.onseeked=r;v.currentTime=t});
+    const kept=[];let prev=null,lastKept=null,lastKeptT=-9;
+    for(let t=0;t<=dur;t+=step){
+      if(run!==visRun)throw new Error('취소됨');
+      await seek(Math.min(t,dur-0.05));const th=thumbOf(v);
+      const stable=prev&&tdiff(th,prev)<0.012,changed=!lastKept||tdiff(th,lastKept)>0.05,stale=t-lastKeptT>2.5;
+      if(changed&&(stable||(stale&&prev&&tdiff(th,prev)<0.05))){kept.push({t,data:jpegOf(v,v.videoWidth,v.videoHeight)});lastKept=th;lastKeptT=t}
+      prev=th;
+      curMsg=`영상에서 장면 고르는 중… ${Math.round(t/dur*100)}% · ${kept.length}장`;
+    }
+    return kept;
+  }finally{URL.revokeObjectURL(v.src)}
+}
+async function framesFromImages(files){
+  files=[...files].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})||a.lastModified-b.lastModified);
+  const out=[];
+  for(const f of files){
+    if(/heic|heif/i.test(f.type+f.name))throw new Error('HEIC 사진은 브라우저가 못 열어요. JPG/PNG 스크린샷으로 올려주세요.');
+    const url=URL.createObjectURL(f);
+    try{const im=new Image();im.src=url;await im.decode();out.push({t:out.length,data:jpegOf(im,im.naturalWidth,im.naturalHeight)})}
+    finally{URL.revokeObjectURL(url)}
+  }
+  return out;
+}
+const OCR_SYSTEM='너는 메신저 화면 받아쓰기 도구다. 화면 속 대화를 빠짐없이, 보이는 글자 그대로 옮겨 적는다. 요약·교정·해석·설명을 하지 않는다.';
+const OCR_TASK=n=>`위 이미지 ${n}장은 메신저(주로 인스타그램 DM) 대화 화면을 녹화한 영상에서 순서대로 뽑은 장면이다(스크린샷일 수도 있다). 스크롤하며 찍었기 때문에 장면끼리 내용이 겹친다. 겹치는 메시지는 한 번만 적고, 대화의 실제 시간 순서(화면 위→아래 = 오래된→최신)대로 이 장면들에 보이는 메시지를 전부 받아 적어라. 위로 스크롤하며 녹화했으면 뒤 장면이 더 오래된 내용이다.
+규칙:
+- 오른쪽 말풍선(내가 보낸 것) = 나. 왼쪽 말풍선 = 말풍선 위·옆에 보이는 이름. 연달아 온 말풍선은 이름이 한 번만 보여도 같은 사람. 1:1 대화라 이름이 없으면 화면 맨 위 대화방 이름. 그것도 안 보이면 상대.
+- 글자는 보이는 그대로(오타·줄임말·이모지·ㅋㅋ 포함). 고치거나 요약하지 않는다.
+- 사진·동영상·릴스/게시물 공유·음성·스티커·GIF는 [사진] [동영상] [공유: 계정명이나 보이는 설명] [음성메시지] [스티커] [GIF].
+- 답장 말풍선이면 메시지 앞에 ↪「인용된 원문 앞부분」 을 붙인다.
+- 화면 가운데의 날짜·시간 표시는 그 자리에 "@ 표시 그대로" 한 줄로.
+- 반응 이모지(하트 등), 읽음·전송됨, 입력 중, 키보드, 상태바, 알림 배너, 앱 버튼은 적지 않는다.
+- 화면 위·아래 가장자리에 잘려 일부만 보이는 말풍선은, 이 장면들 중 다른 곳에서 온전히 보이면 그쪽 것만 적는다. 어디서도 온전히 안 보이면 보이는 만큼 적고 끝에 … 를 붙인다.
+- 흐려서 못 읽는 부분은 [알아볼 수 없음].
+출력 형식(이 형식의 줄만 출력, 다른 설명 금지):
+# 대화방: (화면 맨 위 대화방 이름. 안 보이면 없음)
+@ 11월 5일 오후 3:21
+나: 메시지
+이름: 메시지`;
+function parseOcr(t){
+  const items=[];let room='';
+  for(const raw of cleanOut(String(t)).split('\n')){const l=raw.trim();if(!l)continue;let m;
+    if(m=l.match(/^#\s*대화방\s*[:：]\s*(.*)$/)){if(!/^(없음|-|\(.*\))$/.test(m[1].trim()))room=room||m[1].trim();continue}
+    if(m=l.match(/^@\s*(.+)$/)){items.push({k:'stamp',text:m[1].trim()});continue}
+    if(m=l.match(/^([^:：]{1,40}?)\s*[:：]\s*(.*)$/)){items.push({k:'msg',who:m[1].replace(/^[*\-\s]+|\*+$/g,'').trim(),text:m[2].trim()});continue}
+    const last=items[items.length-1];if(last&&last.k==='msg')last.text+='\n'+l;
+  }
+  return {items,room};
+}
+const ikey=x=>x.k==='stamp'?'@'+normQ(x.text):x.who+'|'+normQ(x.text.replace(/…$/,''));
+const isame=(a,b)=>{if(a.k!==b.k)return false;if(ikey(a)===ikey(b))return true;if(a.k==='msg'&&a.who!==b.who)return false;const x=normQ(a.text.replace(/…$/,'')),y=normQ(b.text.replace(/…$/,''));const min=a.k==='stamp'?3:4;return x.length>=min&&y.length>=min&&(x.startsWith(y)||y.startsWith(x))};
+function overlapLen(A,B){ // A의 끝부분 == B의 앞부분 길이
+  for(let k=Math.min(A.length,B.length,40);k>0;k--){let ok=0;for(let i=0;i<k;i++)if(isame(A[A.length-k+i],B[i]))ok++;if(ok>=k-(k>=4?1:0))return k}return 0}
+function mergeBatches(batches){
+  let acc=[],dir=0,gaps=0;
+  for(const B of batches){if(!B.length)continue;if(!acc.length){acc=B.slice();continue}
+    const f=overlapLen(acc,B),b=overlapLen(B,acc);
+    if(f&&(f>=b||dir>0)){acc=acc.concat(B.slice(f));dir=dir||1}
+    else if(b){acc=B.slice(0,B.length-b).concat(acc);dir=dir||-1}
+    else{gaps++;const gap={k:'gap'};acc=dir<0?B.concat([gap],acc):acc.concat([gap],B)}}
+  return {items:acc,gaps};
+}
+function parseStamp(str,base){
+  const s=str.replace(/\s+/g,' ');let y=null,mo=null,d=null,h=null,mi=0,m;
+  if(m=s.match(/(\d{4})\s*[년.\-/]\s*(\d{1,2})\s*[월.\-/]\s*(\d{1,2})/)){y=+m[1];mo=+m[2];d=+m[3]}
+  else if(m=s.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/)){mo=+m[1];d=+m[2]}
+  else if(m=s.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:,\s*(\d{4}))?/i)){mo=MON[{jan:'january',feb:'february',mar:'march',apr:'april',may:'may',jun:'june',jul:'july',aug:'august',sep:'september',oct:'october',nov:'november',dec:'december'}[m[1].slice(0,3).toLowerCase()]];d=+m[2];if(m[3])y=+m[3]}
+  let dt=new Date(base);dt.setHours(0,0,0,0);
+  if(mo){dt=new Date(y||base.getFullYear(),mo-1,d);if(!y&&dt>base)dt.setFullYear(dt.getFullYear()-1)}
+  else if(/어제|yesterday/i.test(s))dt.setDate(dt.getDate()-1);
+  else if(m=s.match(/([월화수목금토일])요일|\b(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/i)){const idx=m[1]?'일월화수목금토'.indexOf(m[1]):['sun','mon','tue','wed','thu','fri','sat'].indexOf(m[2].toLowerCase());let back=(dt.getDay()-idx+7)%7||7;dt.setDate(dt.getDate()-back)}
+  else if(!/오늘|today|\d{1,2}:\d{2}/i.test(s))return null;
+  if(m=s.match(/(오전|오후|AM|PM)?\s*(\d{1,2}):(\d{2})\s*(AM|PM)?/i)){h=h24(m[1]||m[4],m[2]);mi=+m[3]}
+  if(h!=null)dt.setHours(h,mi);return dt.getTime();
+}
+async function readVisual(files){
+  const run=++visRun;
+  $('#visBox').classList.remove('hidden');$('#visReview').classList.add('hidden');$('#visErr').textContent='';$('#parseErr').textContent='';
+  $('#visBox').scrollIntoView({behavior:'smooth',block:'start'});
+  if(!checkReady($('#visErr'))){$('#visErr').textContent+=' 화면을 읽으려면 AI 키가 먼저 필요해요.';return}
+  if(state.busy){$('#visErr').textContent='다른 작업이 끝난 뒤에 다시 올려주세요.';return}
+  state.busy=true;setStatus($('#visStatus'),'준비 중…');
+  const U={inp:0,cr:0,cw:0,out:0,won:0};const model=$('#model').value.trim();
+  try{
+    const videos=files.filter(f=>/^video\//.test(f.type)||/\.(mp4|mov|m4v|webm|3gp)$/i.test(f.name));
+    let frames=[];
+    for(const v of videos){curBase=curMsg='영상에서 장면 고르는 중…';frames=frames.concat(await framesFromVideo(v,run))}
+    const imgs=files.filter(f=>!videos.includes(f));
+    if(imgs.length){curBase=curMsg='스크린샷 읽는 중…';frames=frames.concat(await framesFromImages(imgs))}
+    if(!frames.length)throw new Error('읽을 장면을 찾지 못했어요. 스크롤을 천천히, 한 화면씩 멈추며 다시 녹화해 보세요.');
+    let note='';
+    if(frames.length>VIS.MAXF){const k=frames.length/VIS.MAXF;frames=Array.from({length:VIS.MAXF},(_,i)=>frames[Math.floor(i*k)]);note=` (너무 길어서 ${VIS.MAXF}장으로 줄였어요 — 일부 메시지를 놓칠 수 있어요)`}
+    // 묶음: 앞 묶음의 마지막 장면을 다음 묶음 첫 장면으로 겹쳐서 이어 붙이기 쉽게
+    const batches=[];for(let i=0;i<frames.length;i+=VIS.BATCH-1){batches.push(frames.slice(i,i+VIS.BATCH));if(i+VIS.BATCH>=frames.length)break}
+    const est=costWon({inp:frames.length*1500+batches.length*700,out:batches.length*900,cr:0,cw:0},model);
+    curBase=`장면 ${frames.length}장을 ${batches.length}묶음으로 나눠 글자 읽는 중…${note}${est!=null?` · 예상 약 ${Math.round(est).toLocaleString()}원`:''}`;curMsg=curBase;
+    const outs=new Array(batches.length);let done=0,next=0,room='';
+    const worker=async()=>{while(next<batches.length){const k=next++;if(run!==visRun)return;
+      const txt=await streamModel({system:OCR_SYSTEM,user:OCR_TASK(batches[k].length),images:batches[k].map(f=>f.data),maxTokens:4000,temp:0,onText:()=>{},
+        onUsage:(u,m)=>{['inp','cr','cw','out'].forEach(x=>U[x]+=u[x]||0);const w=costWon(u,m);if(w!=null)U.won+=w}});
+      const r=parseOcr(txt);outs[k]=r.items;room=room||r.room;done++;curMsg=`${curBase} ${done}/${batches.length}`}};
+    await Promise.all(Array.from({length:Math.min(VIS.CONC,batches.length)},worker));
+    if(run!==visRun)return;
+    const {items,gaps}=mergeBatches(outs);
+    // 시간 붙이기: 표시가 나온 뒤의 메시지는 그 시각 + 순서(초)
+    const base=new Date(Math.max(...files.map(f=>f.lastModified||Date.now())));
+    let ts=null,seq=0;const msgs=[];
+    for(const it of items){
+      if(it.k==='stamp'){const t=parseStamp(it.text,base);if(t!=null){ts=t;seq=0}continue}
+      if(it.k==='gap'){msgs.push({ts:null,sender:'',text:'',gap:true});continue}
+      const media=/^\[(사진|동영상|공유[^\]]*|음성메시지|스티커|GIF)\]$/.test(it.text.trim());
+      msgs.push({ts:ts!=null?ts+(++seq)*1000:null,approx:true,stampFirst:seq===1,sender:it.who||'상대',text:it.text.trim(),media});
+    }
+    if(room)msgs.forEach(m=>{if(m.sender==='상대')m.sender=room});
+    state.vis={msgs:msgs.filter(m=>!m.gap),room,gaps,usage:U,frames:frames.length};
+    showVisReview();
+  }catch(e){if(run===visRun)$('#visErr').textContent=e.message==='취소됨'?'':netHint(e)}
+  finally{if(run===visRun){state.busy=false;setStatus($('#visStatus'),'')}}
+}
+function showVisReview(){
+  const V=state.vis;const cnt={};V.msgs.forEach(m=>cnt[m.sender]=(cnt[m.sender]||0)+1);
+  const names=Object.keys(cnt).sort((a,b)=>(b==='나')-(a==='나')||cnt[b]-cnt[a]);
+  const hasT=V.msgs.some(m=>m.ts);
+  $('#visSummary').innerHTML=`<span class="chip">장면 ${V.frames}장</span> <span class="chip">메시지 ${V.msgs.length}개</span> <span class="chip">${names.length}명</span> <span class="chip">${hasT?'시간 일부 인식':'시간 정보 없음'}</span>${V.usage.won?` <span class="chip">읽기 비용 약 ${Math.round(V.usage.won).toLocaleString()}원</span>`:''}${V.gaps?`<div class="hint">⚠️ 장면이 ${V.gaps}군데 이어지지 않아 그 사이 메시지를 놓쳤을 수 있어요. 더 천천히 스크롤해서 다시 녹화하면 좋아요.</div>`:''}`;
+  $('#visNames').innerHTML=names.map(n=>`<label style="gap:8px"><span style="min-width:0;flex:1">${esc(n)} <span class="hint" style="margin:0">${cnt[n]}개</span></span><input type="text" data-from="${esc(n)}" value="${esc(n==='나'?'':n)}" placeholder="${n==='나'?'내 이름 (선택)':'이름'}" style="flex:1"></label>`).join('');
+  const line=m=>`${m.ts&&m.stampFirst?fmtTs(m.ts).slice(5)+' ':''}${m.sender}: ${m.text}`;
+  const L=V.msgs;$('#visPreview').textContent=L.length<=16?L.map(line).join('\n'):L.slice(0,8).map(line).join('\n')+`\n\n… (${L.length-16}개 생략) …\n\n`+L.slice(-8).map(line).join('\n');
+  $('#visReview').classList.remove('hidden');
+}
+$('#visUse')&&($('#visUse').onclick=()=>{
+  const V=state.vis;if(!V)return;const map={};
+  document.querySelectorAll('#visNames input').forEach(i=>{const v=i.value.trim();map[i.dataset.from]=v||i.dataset.from});
+  const msgs=V.msgs.map(m=>({...m,sender:map[m.sender]||m.sender}));
+  loadMsgs(msgs,'화면 녹화 (AI 판독)',V.room);
+  const me=map['나']||'나';const r=[...document.querySelectorAll('input[name=me]')].find(x=>x.value===me);if(r){r.checked=true;state.me=me}
+});
 function loadText(text){
   const {msgs,format,events}=parseChat(text);
   loadMsgs(msgs,format,'',events);
@@ -701,7 +869,7 @@ function entries(){
       if(m.media&&lp.replace(/×\d+$/,'')===body){const n=(+(lp.match(/×(\d+)$/)||[0,1])[1])+1;cur.parts[cur.parts.length-1]=`${body}×${n}`}
       else cur.parts.push(body);
       cur.last=m.ts||cur.last;cur.n++;return}
-    cur={who,day,time:m.ts?hm(m.ts):'',last:m.ts,parts:[body],n:1};out.push(cur);
+    cur={who,day,time:m.ts&&(!m.approx||m.stampFirst)?hm(m.ts):'',last:m.ts,parts:[body],n:1};out.push(cur);
   });
   while(ei<ev.length)pushEv(ev[ei++]);
   return out.map(e=>e.raw?e:({day:e.day,n:e.n,text:`${e.time?e.time+' ':''}${e.who}: ${e.parts.join(' / ')}`}));
